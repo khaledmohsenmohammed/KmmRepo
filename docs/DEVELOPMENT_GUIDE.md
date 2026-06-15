@@ -280,6 +280,7 @@ The bug report must capture: platform tag, environment, account, attached image,
 - [ ] Acceptance criteria from PRD §7 verified
 - [ ] Tests written (unit + key integration paths)
 - [ ] No data leaves the company environment
+- [ ] Docs updated: feature reference (`docs/features/`) + dated progress entry (`docs/progress/`) — see §15
 
 ---
 
@@ -301,6 +302,32 @@ The bug report must capture: platform tag, environment, account, attached image,
 - [ ] AES-256 at rest, TLS 1.3 in transit
 - [ ] Daily backups, 30-day retention
 - [ ] All services and data confined to the company environment
+
+---
+
+## 15. Documentation & Progress Logging
+
+We keep two living sets of docs alongside this guide:
+
+- **Feature references** — [`docs/features/`](features/): one doc per feature describing
+  what it does, the flow/rules, data model, API, code map, and how to verify.
+  - [Registration & Account Approval](features/registration-and-approval.md) (`P0-F001` + user side of `P0-F002`)
+- **Progress logs** — [`docs/progress/`](progress/): dated daily logs (`YYYY-MM-DD.md`) of
+  finalized work, with timestamped entries and commit hashes.
+  - [2026-06-15](progress/2026-06-15.md) — project bootstrap → dark/light toggle.
+
+### Rule — run this after finalizing any work (do not skip)
+
+Once a piece of work is **verified and committed**, before calling it done:
+
+1. **Append a timestamped entry** to today's progress log
+   (`docs/progress/YYYY-MM-DD.md`, create it if missing) — time, what changed, decisions,
+   commit hash, and how it was verified.
+2. **If it's a feature**, add or update its reference under `docs/features/`.
+3. **Update this guide** — tick the relevant Phase 1–5 checklist item(s) and add links to the
+   new feature/progress files in this section.
+
+This keeps the build order (§6), the feature references, and the day-by-day history in sync.
 
 ---
 
