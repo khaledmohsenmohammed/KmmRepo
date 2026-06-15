@@ -1,10 +1,12 @@
-import { AppBar, Box, Button, Container, Toolbar, Typography } from '@mui/material';
+import { AppBar, Box, Button, Container, IconButton, Toolbar, Tooltip, Typography } from '@mui/material';
 import { Link as RouterLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../features/auth/AuthContext';
+import { useColorMode } from '../theme/ColorModeContext';
 
 /** Shared shell for authenticated pages: top bar + routed content. */
 export function AppLayout() {
   const { user, logout } = useAuth();
+  const { mode, toggle } = useColorMode();
   const location = useLocation();
   const isAdmin = user?.globalRole === 'SUPER_ADMIN';
 
@@ -30,6 +32,16 @@ export function AppLayout() {
               Admin
             </Button>
           )}
+          <Tooltip title={mode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}>
+            <IconButton
+              color="inherit"
+              onClick={toggle}
+              aria-label="toggle color mode"
+              sx={{ fontSize: '1.1rem' }}
+            >
+              {mode === 'dark' ? '☀️' : '🌙'}
+            </IconButton>
+          </Tooltip>
           <Button color="inherit" onClick={() => void logout()}>
             Sign out
           </Button>

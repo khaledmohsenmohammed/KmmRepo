@@ -1,19 +1,23 @@
+import type { PaletteMode } from '@mui/material';
 import { createTheme } from '@mui/material/styles';
 
 /**
- * Base MUI theme. The persisted dark/light toggle is a later Phase 1 task;
- * for now we expose a single light theme built from tokens (no hardcoded colors
- * elsewhere — components reference the theme).
+ * Builds the MUI theme for a given color mode. Components must use theme tokens
+ * (no hardcoded colors) so light/dark works everywhere.
  */
-export const theme = createTheme({
-  palette: {
-    mode: 'light',
-    primary: { main: '#2563eb' },
-    secondary: { main: '#7c3aed' },
-    background: { default: '#f5f6f8' },
-  },
-  shape: { borderRadius: 10 },
-  typography: {
-    fontFamily: ['Inter', 'Roboto', 'system-ui', 'sans-serif'].join(','),
-  },
-});
+export function buildTheme(mode: PaletteMode) {
+  return createTheme({
+    palette: {
+      mode,
+      primary: { main: mode === 'dark' ? '#60a5fa' : '#2563eb' },
+      secondary: { main: mode === 'dark' ? '#a78bfa' : '#7c3aed' },
+      ...(mode === 'light'
+        ? { background: { default: '#f5f6f8' } }
+        : { background: { default: '#0f1115', paper: '#171a21' } }),
+    },
+    shape: { borderRadius: 10 },
+    typography: {
+      fontFamily: ['Inter', 'Roboto', 'system-ui', 'sans-serif'].join(','),
+    },
+  });
+}
