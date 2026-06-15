@@ -6,8 +6,16 @@ import { loginSchema, registerSchema } from './auth.schemas.js';
 
 const router = Router();
 
-router.post('/register', validateBody(registerSchema), asyncHandler(authController.register));
-router.post('/login', validateBody(loginSchema), asyncHandler(authController.login));
+router.post(
+  '/register',
+  validateBody(registerSchema),
+  asyncHandler(authController.register),
+);
+router.post(
+  '/login',
+  validateBody(loginSchema),
+  asyncHandler(authController.login),
+);
 router.post('/refresh', asyncHandler(authController.refresh));
 router.post('/logout', asyncHandler(authController.logout));
 
