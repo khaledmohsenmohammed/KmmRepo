@@ -34,5 +34,10 @@ model User {
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
+  // Soft delete (super-admin can restore). Never hard-delete users.
+  isDeleted    Boolean    @default(false)
+  deletedAt    DateTime?
+  deletedBy    String?
+
   @@map("users")
 }
