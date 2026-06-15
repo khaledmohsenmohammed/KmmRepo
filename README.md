@@ -26,6 +26,7 @@ cd backend
 npx prisma migrate dev      # apply schema
 npm run seed                # creates first super-admin (see .env)
 npm run dev                 # http://localhost:4000/api/v1
+                            # API docs (Swagger UI): http://localhost:4000/api/v1/docs
 
 # 5. Frontend (new terminal)
 cd frontend

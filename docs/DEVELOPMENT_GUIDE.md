@@ -77,6 +77,7 @@ kmmrepo/
 │     ├─ repositories/      # Prisma data access
 │     ├─ middleware/        # auth, role guards, validation, error handler
 │     ├─ lib/               # ai-gateway, storage, audit, jwt
+│     ├─ docs/              # openapi.ts — OpenAPI 3 spec served via Swagger UI
 │     └─ index.ts
 └─ frontend/
    └─ src/
@@ -184,6 +185,7 @@ AuditLog          : id, entity_type, entity_id,
 - Auth: `Authorization: Bearer <accessToken>`; refresh via `POST /api/v1/auth/refresh`.
 - Errors: consistent JSON `{ "error": { "code": string, "message": string, "fields"?: object } }`.
 - Status codes: `400` validation, `401` unauthenticated, `403` unauthorized, `404` not found, `409` conflict/duplicate.
+- **Documented:** every endpoint is described in the OpenAPI spec and browsable via Swagger UI (see §8.1). Add a `paths` entry whenever you add or change an endpoint.
 
 Key endpoints (full list in PRD §9):
 
@@ -200,6 +202,33 @@ POST   /api/v1/executions/:id/bug
 POST   /api/v1/export
 POST   /api/v1/folders/import
 ```
+
+### 8.1 API Documentation (Swagger / OpenAPI)
+
+The API is documented with **OpenAPI 3** and served through **Swagger UI**, so the
+contract is always browsable and testable from the running backend.
+
+| URL | What it is |
+|---|---|
+| `http://localhost:4000/api/v1/docs` | Interactive Swagger UI — read endpoints, see request/response schemas, and "Try it out". |
+| `http://localhost:4000/api/v1/openapi.json` | Raw OpenAPI 3 document (for client generation, Postman/Insomnia import, CI checks). |
+
+**Where it lives:** the spec is a typed object in `backend/src/docs/openapi.ts` and is
+mounted in `backend/src/app.ts` via `swagger-ui-express`. It is defined as a plain
+object (not scanned from JSDoc globs) so it is type-checked and behaves identically
+under `tsx` (dev) and compiled `dist` (prod).
+
+**Keeping it accurate (part of Definition of Done):**
+
+- When you add or change an endpoint, add/update its entry under `paths` and any shared
+  shapes under `components.schemas` in `openapi.ts`.
+- Reuse `$ref: '#/components/schemas/...'` for shared shapes (e.g. `ErrorResponse`,
+  `AuthUser`) instead of redefining them inline.
+- Endpoints that require auth must list `security: [{ bearerAuth: [] }]`; public ones
+  (register, login, refresh, logout, health) set `security: []`.
+
+> Note: `try it out` for `/auth/refresh` and `/auth/logout` relies on the httpOnly
+> `refreshToken` cookie set by `/auth/login`, so log in first in the same browser.
 
 ---
 
@@ -244,6 +273,7 @@ The bug report must capture: platform tag, environment, account, attached image,
 ## 12. Definition of Done (per feature)
 
 - [ ] Endpoint(s) implemented with server-side validation and role guard
+- [ ] OpenAPI spec updated (`backend/src/docs/openapi.ts`) and visible in Swagger UI
 - [ ] Soft-delete and audit behavior applied where relevant
 - [ ] Frontend: loading, error, empty, and success states all handled
 - [ ] Responsive on mobile/tablet/desktop in both themes

@@ -1,7 +1,9 @@
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import express from 'express';
+import swaggerUi from 'swagger-ui-express';
 import { env } from './config/env.js';
+import { openapiSpec } from './docs/openapi.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import routes from './routes/index.js';
 
@@ -16,6 +18,16 @@ export function createApp() {
   );
   app.use(express.json());
   app.use(cookieParser());
+
+  // API documentation: interactive Swagger UI + raw OpenAPI JSON.
+  app.get('/api/v1/openapi.json', (_req, res) => {
+    res.json(openapiSpec);
+  });
+  app.use(
+    '/api/v1/docs',
+    swaggerUi.serve,
+    swaggerUi.setup(openapiSpec, { customSiteTitle: 'KmmRepo API Docs' }),
+  );
 
   app.use('/api/v1', routes);
 
