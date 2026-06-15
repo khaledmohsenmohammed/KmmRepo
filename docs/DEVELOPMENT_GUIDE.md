@@ -112,9 +112,9 @@ Never commit a real `.env`. Keep `.env.example` with placeholders only.
 Build in this order — each phase ends with a validation gate that must pass before moving on.
 
 ### Phase 1 — Foundation & Repository (~2 weeks)
-- [ ] Scaffold backend (Express + Prisma + Postgres/Redis) and frontend (React + MUI) in Docker
-- [ ] Registration + login + JWT refresh rotation (`P0-F001`)
-- [ ] Super-admin console: approve users, assign role + project access (`P0-F002`)
+- [x] Scaffold backend (Express + Prisma + Postgres/Redis) and frontend (React + MUI) in Docker
+- [x] Registration + login + JWT refresh rotation (`P0-F001`)
+- [~] Super-admin console: approve users + activate/deactivate/soft-delete/restore (`P0-F002`) — _user approval & management done; per-project role + project-access assignment deferred until Projects (`P0-F003`) exist_
 - [ ] Projects + nested folders + tree view (`P0-F003`)
 - [ ] Audit logging + created/edited metadata (`P0-F008`)
 - [ ] Responsive MUI shell + persisted dark/light toggle (`P0-F009`)

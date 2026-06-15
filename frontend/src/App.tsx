@@ -1,7 +1,10 @@
 import { CircularProgress, Box } from '@mui/material';
 import { Navigate, Route, Routes } from 'react-router-dom';
+import { AdminRoute } from './components/AdminRoute';
+import { AppLayout } from './components/AppLayout';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { useAuth } from './features/auth/AuthContext';
+import Admin from './pages/Admin';
 import Dashboard from './pages/Dashboard';
 import Login from './pages/Login';
 import Register from './pages/Register';
@@ -39,7 +42,12 @@ export default function App() {
         }
       />
       <Route element={<ProtectedRoute />}>
-        <Route path="/" element={<Dashboard />} />
+        <Route element={<AppLayout />}>
+          <Route path="/" element={<Dashboard />} />
+          <Route element={<AdminRoute />}>
+            <Route path="/admin" element={<Admin />} />
+          </Route>
+        </Route>
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

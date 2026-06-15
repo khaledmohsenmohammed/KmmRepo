@@ -25,3 +25,20 @@ export async function isRefreshJtiValid(userId: string, jti: string): Promise<bo
 export async function revokeRefreshJti(userId: string, jti: string): Promise<void> {
   await redis.del(key(userId, jti));
 }
+
+/**
+ * Revokes every active refresh token for a user (e.g. when an admin disables or
+ * deletes them) so they can no longer obtain new access tokens. Their current
+ * access token still works until it expires (≤ ACCESS_TOKEN_TTL).
+ */
+export async function revokeAllRefreshForUser(userId: string): Promise<void> {
+  const pattern = `refresh:${userId}:*`;
+  let cursor = '0';
+  do {
+    const [next, keys] = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+    cursor = next;
+    if (keys.length > 0) {
+      await redis.del(...keys);
+    }
+  } while (cursor !== '0');
+}

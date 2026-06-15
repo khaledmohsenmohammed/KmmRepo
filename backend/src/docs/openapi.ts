@@ -18,7 +18,10 @@ export const openapiSpec = {
       'account; only `ACTIVE` users can log in.',
   },
   servers: [{ url: '/api/v1', description: 'Default base path' }],
-  tags: [{ name: 'Auth', description: 'Registration, login, and session management' }],
+  tags: [
+    { name: 'Auth', description: 'Registration, login, and session management' },
+    { name: 'Admin', description: 'Super-admin user management (requires SUPER_ADMIN)' },
+  ],
   components: {
     securitySchemes: {
       bearerAuth: {
@@ -94,6 +97,36 @@ export const openapiSpec = {
           accessToken: { type: 'string', example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...' },
         },
         required: ['user', 'accessToken'],
+      },
+      AdminUser: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          name: { type: 'string' },
+          email: { type: 'string', format: 'email' },
+          status: { type: 'string', enum: ['PENDING', 'ACTIVE', 'DISABLED'] },
+          globalRole: { type: 'string', enum: ['SUPER_ADMIN', 'USER'] },
+          isDeleted: { type: 'boolean' },
+          createdAt: { type: 'string', format: 'date-time' },
+        },
+        required: ['id', 'name', 'email', 'status', 'globalRole', 'isDeleted', 'createdAt'],
+      },
+      UsersListResponse: {
+        type: 'object',
+        properties: {
+          users: { type: 'array', items: { $ref: '#/components/schemas/AdminUser' } },
+        },
+        required: ['users'],
+      },
+      AdminUserResponse: {
+        type: 'object',
+        properties: { user: { $ref: '#/components/schemas/AdminUser' } },
+        required: ['user'],
+      },
+      UserStatusUpdate: {
+        type: 'object',
+        properties: { status: { type: 'string', enum: ['ACTIVE', 'DISABLED'] } },
+        required: ['status'],
       },
     },
   },
@@ -222,6 +255,81 @@ export const openapiSpec = {
               },
             },
           },
+        },
+      },
+    },
+    '/admin/users': {
+      get: {
+        tags: ['Admin'],
+        summary: 'List users (super-admin only)',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'status',
+            in: 'query',
+            required: false,
+            schema: { type: 'string', enum: ['PENDING', 'ACTIVE', 'DISABLED'] },
+            description: 'Filter by account status',
+          },
+          {
+            name: 'deleted',
+            in: 'query',
+            required: false,
+            schema: { type: 'string', enum: ['true', 'false'] },
+            description: 'When true, returns soft-deleted users instead of active ones',
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'List of users',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/UsersListResponse' } } },
+          },
+          '401': { description: 'Unauthenticated', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          '403': { description: 'Not a super-admin', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+        },
+      },
+    },
+    '/admin/users/{id}': {
+      patch: {
+        tags: ['Admin'],
+        summary: 'Approve / reject / activate / deactivate a user',
+        description: 'Sets status to ACTIVE (approve/activate) or DISABLED (reject/deactivate). Disabling also revokes the user’s refresh tokens. SUPER_ADMIN targets are protected.',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/UserStatusUpdate' } } },
+        },
+        responses: {
+          '200': { description: 'Updated user', content: { 'application/json': { schema: { $ref: '#/components/schemas/AdminUserResponse' } } } },
+          '400': { description: 'Validation failed', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          '403': { description: 'Not a super-admin, or target is a protected super-admin', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          '404': { description: 'User not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+        },
+      },
+      delete: {
+        tags: ['Admin'],
+        summary: 'Soft-delete a user',
+        description: 'Marks the user as deleted (recoverable). SUPER_ADMIN targets are protected.',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: {
+          '200': { description: 'Soft-deleted user', content: { 'application/json': { schema: { $ref: '#/components/schemas/AdminUserResponse' } } } },
+          '403': { description: 'Not a super-admin, or target is a protected super-admin', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          '404': { description: 'User not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+        },
+      },
+    },
+    '/admin/users/{id}/restore': {
+      post: {
+        tags: ['Admin'],
+        summary: 'Restore a soft-deleted user',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: {
+          '200': { description: 'Restored user', content: { 'application/json': { schema: { $ref: '#/components/schemas/AdminUserResponse' } } } },
+          '403': { description: 'Not a super-admin', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          '404': { description: 'User not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
         },
       },
     },
