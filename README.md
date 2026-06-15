@@ -7,7 +7,8 @@ Self-hosted, role-based **test repository management**.
 - **Data:** PostgreSQL + Redis
 - **Hosting:** Self-hosted via Docker (no data leaves the company environment)
 
-See [`docs/DEVELOPMENT_GUIDE.md`](docs/DEVELOPMENT_GUIDE.md) for the full build plan and conventions.
+> Detailed documentation (development guide, feature references, progress logs) is kept
+> locally under `docs/` and is intentionally not committed to this repo.
 
 ## Quick start
 
@@ -35,5 +36,10 @@ npm run dev                 # http://localhost:5173
 
 ## Current status
 
-**Phase 1, slice 1** — repo configuration + authentication & registration
-(self-register → `PENDING` → super-admin approves → `ACTIVE`).
+**Phase 1 (Foundation) — in progress:**
+
+- ✅ Authentication & registration — self-register → `PENDING` → super-admin approves → `ACTIVE` (JWT access + rotating refresh)
+- ✅ Super-admin user management — approve / reject / activate / deactivate / soft-delete / restore (protected admin accounts)
+- ✅ API docs — Swagger UI at `/api/v1/docs`
+- ✅ Persisted dark/light theme toggle
+- ⬜ Next: Projects + nested folders + tree view
