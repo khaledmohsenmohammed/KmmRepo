@@ -34,3 +34,6 @@ backend/prisma/*.db
 
 # Claude local settings
 .claude/settings.local.json
+
+# Local-only documentation (kept on machine, not pushed)
+docs/
