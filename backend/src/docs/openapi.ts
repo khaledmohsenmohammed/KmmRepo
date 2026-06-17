@@ -22,6 +22,7 @@ export const openapiSpec = {
     { name: 'Auth', description: 'Registration, login, and session management' },
     { name: 'Profile', description: 'Self-service profile management for the current user' },
     { name: 'Admin', description: 'Super-admin user management (requires SUPER_ADMIN)' },
+    { name: 'Projects', description: 'Super-admin project configuration & user assignment (requires SUPER_ADMIN)' },
   ],
   components: {
     securitySchemes: {
@@ -151,6 +152,65 @@ export const openapiSpec = {
         type: 'object',
         properties: { status: { type: 'string', enum: ['ACTIVE', 'DISABLED'] } },
         required: ['status'],
+      },
+      ProjectRole: {
+        type: 'string',
+        enum: ['TEST_LEAD', 'AUTOMATION_TESTER', 'MANUAL_TESTER', 'PENTESTER', 'PROJECT_LEAD'],
+      },
+      Project: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          name: { type: 'string' },
+          description: { type: 'string', nullable: true },
+          memberCount: { type: 'integer', example: 0 },
+          isDeleted: { type: 'boolean' },
+          createdAt: { type: 'string', format: 'date-time' },
+        },
+        required: ['id', 'name', 'description', 'memberCount', 'isDeleted', 'createdAt'],
+      },
+      ProjectResponse: {
+        type: 'object',
+        properties: { project: { $ref: '#/components/schemas/Project' } },
+        required: ['project'],
+      },
+      ProjectsListResponse: {
+        type: 'object',
+        properties: { projects: { type: 'array', items: { $ref: '#/components/schemas/Project' } } },
+        required: ['projects'],
+      },
+      CreateProjectRequest: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', minLength: 2, maxLength: 100, example: 'Mobile App' },
+          description: { type: 'string', maxLength: 500, example: 'Regression suite for the mobile app' },
+        },
+        required: ['name'],
+      },
+      ProjectMember: {
+        type: 'object',
+        properties: {
+          membershipId: { type: 'string' },
+          userId: { type: 'string' },
+          name: { type: 'string' },
+          email: { type: 'string', format: 'email' },
+          role: { $ref: '#/components/schemas/ProjectRole' },
+          grantedAt: { type: 'string', format: 'date-time' },
+        },
+        required: ['membershipId', 'userId', 'name', 'email', 'role', 'grantedAt'],
+      },
+      ProjectMembersResponse: {
+        type: 'object',
+        properties: { members: { type: 'array', items: { $ref: '#/components/schemas/ProjectMember' } } },
+        required: ['members'],
+      },
+      AddMemberRequest: {
+        type: 'object',
+        properties: {
+          userId: { type: 'string' },
+          role: { $ref: '#/components/schemas/ProjectRole' },
+        },
+        required: ['userId', 'role'],
       },
     },
   },
@@ -307,6 +367,113 @@ export const openapiSpec = {
           '200': { description: 'Updated user', content: { 'application/json': { schema: { $ref: '#/components/schemas/ProfileResponse' } } } },
           '400': { description: 'Validation failed', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
           '401': { description: 'Unauthenticated', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+        },
+      },
+    },
+    '/admin/projects': {
+      get: {
+        tags: ['Projects'],
+        summary: 'List projects (super-admin only)',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: 'deleted',
+            in: 'query',
+            required: false,
+            schema: { type: 'string', enum: ['true', 'false'] },
+            description: 'When true, returns soft-deleted projects instead of active ones',
+          },
+        ],
+        responses: {
+          '200': { description: 'List of projects', content: { 'application/json': { schema: { $ref: '#/components/schemas/ProjectsListResponse' } } } },
+          '401': { description: 'Unauthenticated', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          '403': { description: 'Not a super-admin', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+        },
+      },
+      post: {
+        tags: ['Projects'],
+        summary: 'Create a project',
+        security: [{ bearerAuth: [] }],
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/CreateProjectRequest' } } } },
+        responses: {
+          '201': { description: 'Created project', content: { 'application/json': { schema: { $ref: '#/components/schemas/ProjectResponse' } } } },
+          '400': { description: 'Validation failed', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          '403': { description: 'Not a super-admin', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+        },
+      },
+    },
+    '/admin/projects/{id}': {
+      patch: {
+        tags: ['Projects'],
+        summary: 'Rename / edit a project',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/CreateProjectRequest' } } } },
+        responses: {
+          '200': { description: 'Updated project', content: { 'application/json': { schema: { $ref: '#/components/schemas/ProjectResponse' } } } },
+          '400': { description: 'Validation failed', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          '404': { description: 'Project not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+        },
+      },
+      delete: {
+        tags: ['Projects'],
+        summary: 'Soft-delete a project',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: {
+          '200': { description: 'Soft-deleted project', content: { 'application/json': { schema: { $ref: '#/components/schemas/ProjectResponse' } } } },
+          '404': { description: 'Project not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+        },
+      },
+    },
+    '/admin/projects/{id}/restore': {
+      post: {
+        tags: ['Projects'],
+        summary: 'Restore a soft-deleted project',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: {
+          '200': { description: 'Restored project', content: { 'application/json': { schema: { $ref: '#/components/schemas/ProjectResponse' } } } },
+          '404': { description: 'Project not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+        },
+      },
+    },
+    '/admin/projects/{id}/members': {
+      get: {
+        tags: ['Projects'],
+        summary: 'List members of a project',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: {
+          '200': { description: 'Project members', content: { 'application/json': { schema: { $ref: '#/components/schemas/ProjectMembersResponse' } } } },
+          '404': { description: 'Project not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+        },
+      },
+      post: {
+        tags: ['Projects'],
+        summary: 'Assign a user to a project (or update their role)',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/AddMemberRequest' } } } },
+        responses: {
+          '201': { description: 'Member assigned', content: { 'application/json': { schema: { type: 'object', properties: { member: { $ref: '#/components/schemas/ProjectMember' } } } } } },
+          '400': { description: 'Validation failed / user not active', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          '404': { description: 'Project or user not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+        },
+      },
+    },
+    '/admin/projects/{id}/members/{userId}': {
+      delete: {
+        tags: ['Projects'],
+        summary: 'Remove a user from a project',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'userId', in: 'path', required: true, schema: { type: 'string' } },
+        ],
+        responses: {
+          '200': { description: 'Member removed', content: { 'application/json': { schema: { type: 'object', properties: { message: { type: 'string' } } } } } },
+          '404': { description: 'Membership not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
         },
       },
     },

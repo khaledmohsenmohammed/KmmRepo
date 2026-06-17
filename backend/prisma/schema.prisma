@@ -22,6 +22,16 @@ enum GlobalRole {
   USER
 }
 
+// Per-project roles (DEVELOPMENT_GUIDE.md §7). Stored as assignment labels for now;
+// permission enforcement per role is a planned follow-up ("permissions list").
+enum ProjectRole {
+  TEST_LEAD
+  AUTOMATION_TESTER
+  MANUAL_TESTER
+  PENTESTER
+  PROJECT_LEAD
+}
+
 model User {
   id           String     @id @default(cuid())
   name         String
@@ -44,5 +54,41 @@ model User {
   deletedAt    DateTime?
   deletedBy    String?
 
+  memberships  ProjectMembership[]
+
   @@map("users")
+}
+
+model Project {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  createdBy   String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Soft delete (super-admin can restore). Never hard-delete projects.
+  isDeleted   Boolean  @default(false)
+  deletedAt   DateTime?
+  deletedBy   String?
+
+  memberships ProjectMembership[]
+
+  @@map("projects")
+}
+
+model ProjectMembership {
+  id        String      @id @default(cuid())
+  userId    String
+  projectId String
+  role      ProjectRole
+  grantedBy String
+  grantedAt DateTime    @default(now())
+
+  user      User        @relation(fields: [userId], references: [id])
+  project   Project     @relation(fields: [projectId], references: [id])
+
+  // A user holds at most one role per project.
+  @@unique([userId, projectId])
+  @@map("project_memberships")
 }
