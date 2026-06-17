@@ -10,7 +10,11 @@ const schema = z.object({
   JWT_REFRESH_SECRET: z.string().min(1),
   ACCESS_TOKEN_TTL: z.string().default('15m'),
   REFRESH_TOKEN_TTL: z.string().default('7d'),
-  CORS_ORIGIN: z.string().default('http://localhost:5173'),
+  // Comma-separated list of allowed origins (e.g. dev ports 5173 + 5174).
+  CORS_ORIGIN: z
+    .string()
+    .default('http://localhost:5173')
+    .transform((v) => v.split(',').map((s) => s.trim()).filter(Boolean)),
 });
 
 const parsed = schema.safeParse(process.env);
