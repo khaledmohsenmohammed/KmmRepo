@@ -44,14 +44,24 @@ export function AppLayout() {
           </Typography>
 
           {isAdmin && (
-            <Button
-              color="inherit"
-              component={RouterLink}
-              to="/admin"
-              sx={{ mr: 1, fontWeight: location.pathname === '/admin' ? 700 : 400 }}
-            >
-              Admin
-            </Button>
+            <>
+              <Button
+                color="inherit"
+                component={RouterLink}
+                to="/admin"
+                sx={{ fontWeight: location.pathname === '/admin' ? 700 : 400 }}
+              >
+                Admin
+              </Button>
+              <Button
+                color="inherit"
+                component={RouterLink}
+                to="/admin/projects"
+                sx={{ mr: 1, fontWeight: location.pathname === '/admin/projects' ? 700 : 400 }}
+              >
+                Projects
+              </Button>
+            </>
           )}
 
           {/* Account trigger: avatar + name -> dropdown menu */}
