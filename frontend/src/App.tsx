@@ -8,6 +8,7 @@ import Admin from './pages/Admin';
 import Dashboard from './pages/Dashboard';
 import Login from './pages/Login';
 import Profile from './pages/Profile';
+import Projects from './pages/Projects';
 import Register from './pages/Register';
 
 /** Redirects already-authenticated users away from auth pages. */
@@ -48,6 +49,7 @@ export default function App() {
           <Route path="/profile" element={<Profile />} />
           <Route element={<AdminRoute />}>
             <Route path="/admin" element={<Admin />} />
+            <Route path="/admin/projects" element={<Projects />} />
           </Route>
         </Route>
       </Route>
