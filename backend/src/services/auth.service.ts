@@ -21,6 +21,10 @@ export interface PublicUser {
   email: string;
   status: string;
   globalRole: string;
+  avatarUrl: string | null;
+  avatarName: string | null;
+  avatarDescription: string | null;
+  avatarRef: string | null;
 }
 
 export interface AuthTokens {
@@ -28,13 +32,17 @@ export interface AuthTokens {
   refreshToken: string;
 }
 
-function toPublicUser(user: User): PublicUser {
+export function toPublicUser(user: User): PublicUser {
   return {
     id: user.id,
     name: user.name,
     email: user.email,
     status: user.status,
     globalRole: user.globalRole,
+    avatarUrl: user.avatarUrl,
+    avatarName: user.avatarName,
+    avatarDescription: user.avatarDescription,
+    avatarRef: user.avatarRef,
   };
 }
 

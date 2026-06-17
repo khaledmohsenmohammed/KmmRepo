@@ -14,6 +14,8 @@ interface AuthContextValue {
   isLoading: boolean;
   login: (payload: LoginPayload) => Promise<AuthUser>;
   logout: () => Promise<void>;
+  /** Replace the cached current user (e.g. after a profile update). */
+  updateUser: (user: AuthUser) => void;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -68,9 +70,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const updateUser = useCallback((u: AuthUser) => {
+    setUser(u);
+  }, []);
+
   const value = useMemo(
-    () => ({ user, isLoading, login, logout }),
-    [user, isLoading, login, logout],
+    () => ({ user, isLoading, login, logout, updateUser }),
+    [user, isLoading, login, logout, updateUser],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

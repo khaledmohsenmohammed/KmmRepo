@@ -16,7 +16,8 @@ export function createApp() {
       credentials: true,
     }),
   );
-  app.use(express.json());
+  // Raised from the 100kb default to allow base64 avatar images on the profile API.
+  app.use(express.json({ limit: '5mb' }));
   app.use(cookieParser());
 
   // API documentation: interactive Swagger UI + raw OpenAPI JSON.

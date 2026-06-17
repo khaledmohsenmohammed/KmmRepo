@@ -29,6 +29,11 @@ model User {
   passwordHash String
   bio          String?
   avatarUrl    String?
+  // Profile avatar metadata (self-service profile management).
+  avatarName        String?
+  avatarDescription String?
+  // Unique ref per upload: "<ISO date-time>-<random>" (e.g. 2026-06-17T10:22:31.000Z-48217).
+  avatarRef         String?
   status       UserStatus @default(PENDING)
   globalRole   GlobalRole @default(USER)
   createdAt    DateTime   @default(now())

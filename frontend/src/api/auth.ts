@@ -6,6 +6,10 @@ export interface AuthUser {
   email: string;
   status: 'PENDING' | 'ACTIVE' | 'DISABLED';
   globalRole: 'SUPER_ADMIN' | 'USER';
+  avatarUrl: string | null;
+  avatarName: string | null;
+  avatarDescription: string | null;
+  avatarRef: string | null;
 }
 
 export interface RegisterPayload {

@@ -22,6 +22,14 @@ export function AppLayout() {
           >
             KmmRepo
           </Typography>
+          <Button
+            color="inherit"
+            component={RouterLink}
+            to="/profile"
+            sx={{ fontWeight: location.pathname === '/profile' ? 700 : 400 }}
+          >
+            Profile
+          </Button>
           {isAdmin && (
             <Button
               color="inherit"

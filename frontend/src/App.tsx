@@ -7,6 +7,7 @@ import { useAuth } from './features/auth/AuthContext';
 import Admin from './pages/Admin';
 import Dashboard from './pages/Dashboard';
 import Login from './pages/Login';
+import Profile from './pages/Profile';
 import Register from './pages/Register';
 
 /** Redirects already-authenticated users away from auth pages. */
@@ -44,6 +45,7 @@ export default function App() {
       <Route element={<ProtectedRoute />}>
         <Route element={<AppLayout />}>
           <Route path="/" element={<Dashboard />} />
+          <Route path="/profile" element={<Profile />} />
           <Route element={<AdminRoute />}>
             <Route path="/admin" element={<Admin />} />
           </Route>

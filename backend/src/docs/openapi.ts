@@ -20,6 +20,7 @@ export const openapiSpec = {
   servers: [{ url: '/api/v1', description: 'Default base path' }],
   tags: [
     { name: 'Auth', description: 'Registration, login, and session management' },
+    { name: 'Profile', description: 'Self-service profile management for the current user' },
     { name: 'Admin', description: 'Super-admin user management (requires SUPER_ADMIN)' },
   ],
   components: {
@@ -59,8 +60,31 @@ export const openapiSpec = {
           email: { type: 'string', format: 'email', example: 'admin@kmmrepo.local' },
           status: { type: 'string', enum: ['PENDING', 'ACTIVE', 'DISABLED'] },
           globalRole: { type: 'string', enum: ['SUPER_ADMIN', 'USER'] },
+          avatarUrl: { type: 'string', nullable: true, description: 'base64 data URL of the avatar image' },
+          avatarName: { type: 'string', nullable: true },
+          avatarDescription: { type: 'string', nullable: true },
+          avatarRef: { type: 'string', nullable: true, example: '2026-06-17T10:22:31.000Z-48217' },
         },
         required: ['id', 'name', 'email', 'status', 'globalRole'],
+      },
+      UpdateProfileRequest: {
+        type: 'object',
+        description: 'Any subset of fields. When `avatar` is present a new `avatarRef` is generated.',
+        properties: {
+          name: { type: 'string', minLength: 2, maxLength: 100, example: 'New Name' },
+          avatarName: { type: 'string', maxLength: 100, example: 'My pic' },
+          avatarDescription: { type: 'string', maxLength: 500, example: 'A photo of me' },
+          avatar: {
+            type: 'string',
+            description: 'Image as a base64 data URL (data:image/...;base64,...)',
+            example: 'data:image/png;base64,iVBORw0KGgo...',
+          },
+        },
+      },
+      ProfileResponse: {
+        type: 'object',
+        properties: { user: { $ref: '#/components/schemas/AuthUser' } },
+        required: ['user'],
       },
       RegisterRequest: {
         type: 'object',
@@ -255,6 +279,34 @@ export const openapiSpec = {
               },
             },
           },
+        },
+      },
+    },
+    '/profile': {
+      get: {
+        tags: ['Profile'],
+        summary: 'Get the current user\'s profile',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          '200': {
+            description: 'Current user',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ProfileResponse' } } },
+          },
+          '401': { description: 'Unauthenticated', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+        },
+      },
+      patch: {
+        tags: ['Profile'],
+        summary: 'Update the current user\'s name and/or avatar',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/UpdateProfileRequest' } } },
+        },
+        responses: {
+          '200': { description: 'Updated user', content: { 'application/json': { schema: { $ref: '#/components/schemas/ProfileResponse' } } } },
+          '400': { description: 'Validation failed', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          '401': { description: 'Unauthenticated', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
         },
       },
     },
