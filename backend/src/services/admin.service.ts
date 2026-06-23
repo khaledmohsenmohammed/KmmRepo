@@ -54,7 +54,9 @@ async function loadActionableTarget(id: string): Promise<User> {
     throw ApiError.notFound('User not found');
   }
   if (target.globalRole === 'SUPER_ADMIN') {
-    throw ApiError.forbidden('Super-admin accounts are protected and cannot be modified');
+    throw ApiError.forbidden(
+      'Super-admin accounts are protected and cannot be modified',
+    );
   }
   return target;
 }
@@ -72,11 +74,18 @@ export async function setUserStatus(
     await revokeAllRefreshForUser(id);
   }
 
-  audit(status === 'ACTIVE' ? 'APPROVE' : 'DISABLE', { type: 'User', id }, { by: actingUserId });
+  audit(
+    status === 'ACTIVE' ? 'APPROVE' : 'DISABLE',
+    { type: 'User', id },
+    { by: actingUserId },
+  );
   return toAdminUser(updated);
 }
 
-export async function softDeleteUser(actingUserId: string, id: string): Promise<AdminUser> {
+export async function softDeleteUser(
+  actingUserId: string,
+  id: string,
+): Promise<AdminUser> {
   await loadActionableTarget(id);
   const updated = await prisma.user.update({
     where: { id },
@@ -88,10 +97,21 @@ export async function softDeleteUser(actingUserId: string, id: string): Promise<
   return toAdminUser(updated);
 }
 
-export async function restoreUser(actingUserId: string, id: string): Promise<AdminUser> {
+export async function restoreUser(
+  actingUserId: string,
+  id: string,
+): Promise<AdminUser> {
   const target = await prisma.user.findUnique({ where: { id } });
   if (!target) {
     throw ApiError.notFound('User not found');
+  }
+  // A super-admin cannot be restored via the API. This is a safeguard.
+  // While they can't be soft-deleted in the first place, this prevents issues
+  // if the database is ever modified manually.
+  if (target.globalRole === 'SUPER_ADMIN') {
+    throw ApiError.forbidden(
+      'Super-admin accounts are protected and cannot be restored',
+    );
   }
   const updated = await prisma.user.update({
     where: { id },

@@ -1,50 +1,8 @@
+// test-utils must be imported first: it registers vi.mock hoists and exports a
+// vi.hoisted() store, which requires this import to precede all others.
+import { stores } from './test-utils.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
-
-/**
- * In-memory fakes for Prisma and Redis so the profile flow can be tested end-to-end
- * (login → authenticated GET/PATCH /profile) without live infrastructure.
- */
-const stores = vi.hoisted(() => {
-  const users: Record<string, unknown>[] = [];
-  const redisMap = new Map<string, string>();
-  return { users, redisMap, idCounter: { n: 0 } };
-});
-
-vi.mock('../lib/prisma.js', () => ({
-  prisma: {
-    user: {
-      findUnique: async ({ where }: { where: { email?: string; id?: string } }) =>
-        stores.users.find(
-          (u) => (where.email && u.email === where.email) || (where.id && u.id === where.id),
-        ) ?? null,
-      update: async ({
-        where,
-        data,
-      }: {
-        where: { id: string };
-        data: Record<string, unknown>;
-      }) => {
-        const user = stores.users.find((u) => u.id === where.id);
-        if (!user) throw new Error('not found');
-        Object.assign(user, data, { updatedAt: new Date() });
-        return user;
-      },
-    },
-  },
-}));
-
-vi.mock('../lib/redis.js', () => ({
-  redis: {
-    set: async (key: string, value: string) => {
-      stores.redisMap.set(key, value);
-      return 'OK';
-    },
-    exists: async (key: string) => (stores.redisMap.has(key) ? 1 : 0),
-    del: async (key: string) => (stores.redisMap.delete(key) ? 1 : 0),
-    on: () => undefined,
-  },
-}));
 
 const { createApp } = await import('../app.js');
 const { hashPassword } = await import('../lib/password.js');
@@ -55,9 +13,11 @@ const app = createApp();
 const SAMPLE_AVATAR =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
 
-async function seedActiveUser() {
+async function seedActiveUser(
+  overrides: Partial<(typeof stores.users)[number]> = {},
+) {
   stores.users.push({
-    id: `user_${++stores.idCounter.n}`,
+    id: `user_${stores.users.length + 1}`,
     name: 'Test User',
     email: 'user@example.com',
     passwordHash: await hashPassword('Password123'),
@@ -69,8 +29,11 @@ async function seedActiveUser() {
     status: 'ACTIVE',
     globalRole: 'USER',
     isDeleted: false,
+    deletedAt: null,
+    deletedBy: null,
     createdAt: new Date(),
     updatedAt: new Date(),
+    ...overrides,
   });
 }
 
@@ -84,7 +47,6 @@ async function loginAndGetToken(): Promise<string> {
 beforeEach(() => {
   stores.users.length = 0;
   stores.redisMap.clear();
-  stores.idCounter.n = 0;
 });
 
 describe('GET /api/v1/profile', () => {
@@ -174,7 +136,9 @@ describe('PATCH /api/v1/profile', () => {
   });
 
   it('requires authentication', async () => {
-    const res = await request(app).patch('/api/v1/profile').send({ name: 'Nope' });
+    const res = await request(app)
+      .patch('/api/v1/profile')
+      .send({ name: 'Nope' });
     expect(res.status).toBe(401);
   });
 });

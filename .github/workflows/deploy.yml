@@ -1,0 +1,107 @@
+name: CI/CD
+
+# Free pipeline: tests on every PR; on push to main, build images on the GitHub
+# runner (keeps build off paid Cloud Build) and deploy two Cloud Run services —
+# the Express API and a static nginx frontend.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  PROJECT_ID: project-8bca4a69-7830-443b-884
+  REGION: us-central1
+  AR_REPO: app-images
+  BACKEND_SERVICE: kmmrepo-backend
+  FRONTEND_SERVICE: kmmrepo-frontend
+  # Frontend Cloud Run URL is deterministic from the project number — used for CORS.
+  CORS_ORIGIN: https://kmmrepo-frontend-697243894897.us-central1.run.app
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+  deploy-backend:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      url: ${{ steps.deploy.outputs.url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      - name: Build & push backend image
+        run: |
+          IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO}/backend:${GITHUB_SHA}"
+          docker build -f backend/Dockerfile -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Deploy backend to Cloud Run
+        id: deploy
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+          JWT_ACCESS_SECRET: ${{ secrets.JWT_ACCESS_SECRET }}
+          JWT_REFRESH_SECRET: ${{ secrets.JWT_REFRESH_SECRET }}
+        run: |
+          # ^##^ sets '##' as the var delimiter so commas/special chars in the
+          # values (CORS_ORIGIN, connection strings) pass through intact.
+          gcloud run deploy "$BACKEND_SERVICE" \
+            --image="$IMAGE" \
+            --region="$REGION" \
+            --platform=managed \
+            --allow-unauthenticated \
+            --port=8080 \
+            --set-env-vars="^##^NODE_ENV=production##CORS_ORIGIN=${CORS_ORIGIN}##ACCESS_TOKEN_TTL=15m##REFRESH_TOKEN_TTL=7d##DATABASE_URL=${DATABASE_URL}##REDIS_URL=${REDIS_URL}##JWT_ACCESS_SECRET=${JWT_ACCESS_SECRET}##JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}"
+          URL="$(gcloud run services describe "$BACKEND_SERVICE" --region="$REGION" --format='value(status.url)')"
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "Backend deployed at $URL"
+
+  deploy-frontend:
+    needs: deploy-backend
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      - name: Build & push frontend image
+        run: |
+          IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO}/frontend:${GITHUB_SHA}"
+          # Vite inlines the API URL at build time -> bake in the backend URL.
+          docker build -f frontend/Dockerfile \
+            --build-arg VITE_API_BASE_URL="${{ needs.deploy-backend.outputs.url }}/api/v1" \
+            -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Deploy frontend to Cloud Run
+        run: |
+          gcloud run deploy "$FRONTEND_SERVICE" \
+            --image="$IMAGE" \
+            --region="$REGION" \
+            --platform=managed \
+            --allow-unauthenticated \
+            --port=8080

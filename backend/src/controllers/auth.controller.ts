@@ -7,7 +7,10 @@ const REFRESH_COOKIE = 'refreshToken';
 const refreshCookieOptions: CookieOptions = {
   httpOnly: true,
   secure: isProd,
-  sameSite: 'strict',
+  // In production the frontend and API are on separate *.run.app sites, so the
+  // refresh cookie must be SameSite=None (requires Secure) to be sent cross-site.
+  // Locally everything is same-site on localhost, so keep the stricter default.
+  sameSite: isProd ? 'none' : 'strict',
   // Only sent to the auth routes that need it.
   path: '/api/v1/auth',
   maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days

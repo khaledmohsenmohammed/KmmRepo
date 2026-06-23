@@ -1,76 +1,29 @@
+// test-utils must be imported first: it registers vi.mock hoists and exports a
+// vi.hoisted() store, which requires this import to precede all others.
+import { stores } from './test-utils.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
-
-/**
- * In-memory fakes for Prisma and Redis so the auth flow can be tested end-to-end
- * (routes → controller → service → lib) without live infrastructure.
- */
-const stores = vi.hoisted(() => {
-  type FakeUser = {
-    id: string;
-    name: string;
-    email: string;
-    passwordHash: string;
-    status: string;
-    globalRole: string;
-    createdAt: Date;
-    updatedAt: Date;
-  };
-  const users: FakeUser[] = [];
-  const redisMap = new Map<string, string>();
-  return { users, redisMap, idCounter: { n: 0 } };
-});
-
-vi.mock('../lib/prisma.js', () => ({
-  prisma: {
-    user: {
-      findUnique: async ({ where }: { where: { email?: string; id?: string } }) =>
-        stores.users.find(
-          (u) => (where.email && u.email === where.email) || (where.id && u.id === where.id),
-        ) ?? null,
-      create: async ({ data }: { data: Record<string, unknown> }) => {
-        const now = new Date();
-        const user = {
-          id: `user_${++stores.idCounter.n}`,
-          bio: null,
-          avatarUrl: null,
-          createdAt: now,
-          updatedAt: now,
-          ...data,
-        } as unknown as (typeof stores.users)[number];
-        stores.users.push(user);
-        return user;
-      },
-    },
-  },
-}));
-
-vi.mock('../lib/redis.js', () => ({
-  redis: {
-    set: async (key: string, value: string) => {
-      stores.redisMap.set(key, value);
-      return 'OK';
-    },
-    exists: async (key: string) => (stores.redisMap.has(key) ? 1 : 0),
-    del: async (key: string) => (stores.redisMap.delete(key) ? 1 : 0),
-    on: () => undefined,
-  },
-}));
 
 const { createApp } = await import('../app.js');
 const { hashPassword } = await import('../lib/password.js');
 
 const app = createApp();
 
-async function seedUser(overrides: Partial<{ email: string; status: string; password: string }> = {}) {
+async function seedUser(
+  overrides: Partial<{ email: string; status: string; password: string }> = {},
+) {
+  const id = `user_${stores.users.length + 1}`;
   const password = overrides.password ?? 'Password123';
   stores.users.push({
-    id: `user_${++stores.idCounter.n}`,
+    id,
     name: 'Test User',
     email: overrides.email ?? 'user@example.com',
     passwordHash: await hashPassword(password),
     status: overrides.status ?? 'ACTIVE',
     globalRole: 'USER',
+    isDeleted: false,
+    deletedAt: null,
+    deletedBy: null,
     createdAt: new Date(),
     updatedAt: new Date(),
   });
@@ -86,14 +39,17 @@ function refreshCookieFrom(res: request.Response): string {
 beforeEach(() => {
   stores.users.length = 0;
   stores.redisMap.clear();
-  stores.idCounter.n = 0;
 });
 
 describe('POST /api/v1/auth/register', () => {
   it('creates a PENDING user and returns no token', async () => {
     const res = await request(app)
       .post('/api/v1/auth/register')
-      .send({ name: 'Alice', email: 'alice@example.com', password: 'Password123' });
+      .send({
+        name: 'Alice',
+        email: 'alice@example.com',
+        password: 'Password123',
+      });
 
     expect(res.status).toBe(201);
     expect(res.body.user.status).toBe('PENDING');
@@ -105,7 +61,11 @@ describe('POST /api/v1/auth/register', () => {
     await seedUser({ email: 'dupe@example.com' });
     const res = await request(app)
       .post('/api/v1/auth/register')
-      .send({ name: 'Dupe', email: 'dupe@example.com', password: 'Password123' });
+      .send({
+        name: 'Dupe',
+        email: 'dupe@example.com',
+        password: 'Password123',
+      });
 
     expect(res.status).toBe(409);
     expect(res.body.error.code).toBe('CONFLICT');
@@ -168,22 +128,30 @@ describe('refresh rotation + logout', () => {
   it('rotates the refresh token and rejects reuse of the old one', async () => {
     const cookie = await loginAndGetCookie();
 
-    const first = await request(app).post('/api/v1/auth/refresh').set('Cookie', cookie);
+    const first = await request(app)
+      .post('/api/v1/auth/refresh')
+      .set('Cookie', cookie);
     expect(first.status).toBe(200);
     expect(first.body.accessToken).toBeTruthy();
 
     // Reusing the original (now-rotated) cookie must fail.
-    const reuse = await request(app).post('/api/v1/auth/refresh').set('Cookie', cookie);
+    const reuse = await request(app)
+      .post('/api/v1/auth/refresh')
+      .set('Cookie', cookie);
     expect(reuse.status).toBe(401);
   });
 
   it('revokes the refresh token on logout', async () => {
     const cookie = await loginAndGetCookie();
 
-    const out = await request(app).post('/api/v1/auth/logout').set('Cookie', cookie);
+    const out = await request(app)
+      .post('/api/v1/auth/logout')
+      .set('Cookie', cookie);
     expect(out.status).toBe(200);
 
-    const after = await request(app).post('/api/v1/auth/refresh').set('Cookie', cookie);
+    const after = await request(app)
+      .post('/api/v1/auth/refresh')
+      .set('Cookie', cookie);
     expect(after.status).toBe(401);
   });
 });

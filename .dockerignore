@@ -1,0 +1,10 @@
+# Applies to both backend and frontend image builds (context = repo root).
+**/node_modules
+**/dist
+**/.env
+**/.env.*
+!**/.env.example
+**/*.log
+**/__tests__
+.git
+.github
