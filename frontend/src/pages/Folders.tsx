@@ -2,7 +2,6 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import {
   Alert,
   Box,
-  Breadcrumbs,
   Button,
   Chip,
   CircularProgress,
@@ -13,6 +12,8 @@ import {
   DialogTitle,
   Divider,
   FormControl,
+  IconButton,
+  InputAdornment,
   InputLabel,
   Link as MuiLink,
   Menu,
@@ -21,20 +22,14 @@ import {
   Select,
   Snackbar,
   Stack,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableRow,
   TextField,
-  ToggleButton,
-  ToggleButtonGroup,
+  Tooltip,
   Typography,
 } from '@mui/material';
 import { SimpleTreeView } from '@mui/x-tree-view/SimpleTreeView';
 import { TreeItem } from '@mui/x-tree-view/TreeItem';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Link as RouterLink, useParams } from 'react-router-dom';
 import { z } from 'zod';
@@ -54,8 +49,8 @@ const ROOT = '__root__';
 type Toast = { msg: string; severity: 'success' | 'error' };
 type ContextMenu = { folder: FolderNode; x: number; y: number } | null;
 
-const ExpandIcon = () => <Box component="span">▸</Box>;
-const CollapseIcon = () => <Box component="span">▾</Box>;
+const ExpandIcon = () => <Box component="span" sx={{ fontSize: 12, color: 'text.secondary' }}>▸</Box>;
+const CollapseIcon = () => <Box component="span" sx={{ fontSize: 12, color: 'text.secondary' }}>▾</Box>;
 
 const nameSchema = z.object({
   name: z.string().trim().min(1, 'Name is required').max(100, 'Name is too long'),
@@ -81,7 +76,23 @@ function indexTree(tree: FolderNode[]): TreeIndex {
   return { byId, parentOf };
 }
 
-/** Flattens the tree to `{ id, name, depth }`, optionally excluding a subtree. */
+/** Total descendant folders under a node (excludes the node itself). */
+function descendantCount(node: FolderNode): number {
+  let total = 0;
+  const stack = [...node.children];
+  while (stack.length) {
+    const n = stack.pop()!;
+    total++;
+    stack.push(...n.children);
+  }
+  return total;
+}
+
+/** Xray-style `direct (total-in-subtree)` count label. */
+function countLabel(direct: number, total: number): string {
+  return `${direct} (${total})`;
+}
+
 function flatten(nodes: FolderNode[], excludeId?: string, depth = 0): { id: string; name: string; depth: number }[] {
   const out: { id: string; name: string; depth: number }[] = [];
   for (const n of nodes) {
@@ -100,6 +111,8 @@ export default function Folders() {
   const [selectedId, setSelectedId] = useState<string>(ROOT);
   const [expanded, setExpanded] = useState<string[]>([ROOT]);
   const [menu, setMenu] = useState<ContextMenu>(null);
+  const [overflowEl, setOverflowEl] = useState<null | HTMLElement>(null);
+  const [search, setSearch] = useState('');
   const [toast, setToast] = useState<Toast | null>(null);
 
   const [createUnder, setCreateUnder] = useState<{ parentId: string | null } | null>(null);
@@ -125,10 +138,24 @@ export default function Folders() {
   const canManage = active?.canManage ?? false;
   const { byId, parentOf } = useMemo(() => indexTree(tree), [tree]);
 
-  // The selected folder (null when the virtual repository root is selected).
-  const selectedFolder = selectedId === ROOT ? null : byId.get(selectedId) ?? null;
+  // Expand the whole tree on first load (Xray shows the hierarchy expanded).
+  const didInit = useRef(false);
+  useEffect(() => {
+    if (!didInit.current && tree.length > 0) {
+      didInit.current = true;
+      setExpanded([ROOT, ...byId.keys()]);
+    }
+  }, [tree, byId]);
 
-  // Breadcrumb path from the repository root to the selected folder.
+  // Selecting a folder also expands it, so its children are visible in the tree.
+  const selectFolder = (id: string) => {
+    setSelectedId(id);
+    if (id !== ROOT) setExpanded((e) => (e.includes(id) ? e : [...e, id]));
+  };
+
+  const selectedFolder = selectedId === ROOT ? null : byId.get(selectedId) ?? null;
+  const totalFolders = useMemo(() => tree.reduce((a, n) => a + 1 + descendantCount(n), 0), [tree]);
+
   const path = useMemo(() => {
     const out: { id: string; name: string }[] = [];
     let cur: string | null = selectedFolder?.id ?? null;
@@ -141,14 +168,14 @@ export default function Folders() {
     return out;
   }, [selectedFolder, byId, parentOf]);
 
-  // Contents of the selected node (children of a folder, or the roots for the repository).
   const contents = selectedId === ROOT ? tree : selectedFolder?.children ?? [];
+  const filtered = contents.filter((c) => c.name.toLowerCase().includes(search.trim().toLowerCase()));
 
   const remove = useMutation({
     mutationFn: (id: string) => deleteFolder(projectId!, id),
     onSuccess: () => {
       invalidate();
-      if (selectedFolder && confirmDelete?.id === selectedId) setSelectedId(ROOT);
+      if (confirmDelete?.id === selectedId) setSelectedId(ROOT);
       setToast({ msg: 'Folder deleted', severity: 'success' });
     },
     onError,
@@ -163,7 +190,11 @@ export default function Folders() {
   });
   const busy = remove.isPending || restore.isPending;
 
+  const createUnderSelected = () => setCreateUnder({ parentId: selectedFolder?.id ?? null });
+
   function renderNode(node: FolderNode) {
+    const isSel = node.id === selectedId;
+    const open = expanded.includes(node.id) && node.children.length > 0;
     return (
       <TreeItem
         key={node.id}
@@ -176,14 +207,18 @@ export default function Folders() {
               e.stopPropagation();
               setMenu({ folder: node, x: e.clientX, y: e.clientY });
             }}
-            sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 0.5, pr: 1 }}
+            sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 0.6, pr: 1 }}
           >
-            <Typography component="span" noWrap>
-              📁 {node.name}
+            <Typography
+              component="span"
+              noWrap
+              sx={{ color: isSel ? 'primary.main' : 'text.primary', fontWeight: isSel ? 600 : 400 }}
+            >
+              {open ? '📂' : '📁'} {node.name}
             </Typography>
-            {node.children.length > 0 && (
-              <Chip size="small" label={node.children.length} variant="outlined" sx={{ ml: 1, height: 20 }} />
-            )}
+            <Typography component="span" variant="body2" sx={{ color: 'text.secondary', ml: 1, whiteSpace: 'nowrap' }}>
+              {countLabel(node.children.length, descendantCount(node))}
+            </Typography>
           </Box>
         }
       >
@@ -194,24 +229,10 @@ export default function Folders() {
 
   return (
     <Box>
-      <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
-        <Box>
-          <Button size="small" component={RouterLink} to="/admin/projects" sx={{ mb: 0.5 }}>
-            ← Projects
-          </Button>
-          <Typography variant="h5" fontWeight={700}>
-            Test Repository
-          </Typography>
-        </Box>
-        <ToggleButtonGroup
-          size="small"
-          exclusive
-          value={view}
-          onChange={(_e, v) => v && setView(v)}
-        >
-          <ToggleButton value="REPO">Repository</ToggleButton>
-          <ToggleButton value="DELETED">Deleted</ToggleButton>
-        </ToggleButtonGroup>
+      <Stack direction="row" alignItems="center" sx={{ mb: 1 }}>
+        <Button size="small" component={RouterLink} to="/admin/projects">
+          ← Projects
+        </Button>
       </Stack>
 
       {isLoading ? (
@@ -220,44 +241,59 @@ export default function Folders() {
         </Box>
       ) : isError ? (
         <Alert severity="error">{getApiErrorMessage(error, 'Failed to load folders')}</Alert>
-      ) : view === 'DELETED' ? (
-        <DeletedPanel
-          folders={deletedData?.folders ?? []}
-          canManage={canManage}
-          busy={busy}
-          onRestore={(id) => restore.mutate(id)}
-        />
       ) : (
-        <Paper variant="outlined" sx={{ display: 'flex', minHeight: 420, overflow: 'hidden' }}>
-          {/* Left: folder tree */}
-          <Box sx={{ width: 320, borderRight: 1, borderColor: 'divider', display: 'flex', flexDirection: 'column' }}>
-            <Toolbar
-              canManage={canManage}
-              selectedFolder={selectedFolder}
-              onNew={() => setCreateUnder({ parentId: selectedFolder?.id ?? null })}
-              onRename={() => selectedFolder && setRenameTarget(selectedFolder)}
-              onMove={() => selectedFolder && setMoveTarget(selectedFolder)}
-              onDelete={() => selectedFolder && setConfirmDelete(selectedFolder)}
-            />
-            <Divider />
-            <Box sx={{ flex: 1, overflow: 'auto', p: 1 }}>
+        <Paper variant="outlined" sx={{ display: 'flex', minHeight: 520, overflow: 'hidden' }}>
+          {/* ── Left: folder tree ───────────────────────────── */}
+          <Box sx={{ width: 340, borderRight: 1, borderColor: 'divider', display: 'flex', flexDirection: 'column' }}>
+            {/* Icon toolbar */}
+            <Stack
+              direction="row"
+              justifyContent="flex-end"
+              alignItems="center"
+              spacing={0.5}
+              sx={{ px: 1, py: 0.5, borderBottom: 1, borderColor: 'divider', minHeight: 44 }}
+            >
+              {canManage && (
+                <Tooltip title={selectedFolder ? 'Add subfolder' : 'Add folder'}>
+                  <IconButton size="small" color="primary" onClick={createUnderSelected}>
+                    <Box component="span" sx={{ fontSize: 20, lineHeight: 1, fontWeight: 600 }}>＋</Box>
+                  </IconButton>
+                </Tooltip>
+              )}
+              <Tooltip title="Collapse all">
+                <IconButton size="small" onClick={() => setExpanded([ROOT])}>
+                  <Box component="span" sx={{ fontSize: 16, lineHeight: 1 }}>⊟</Box>
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="More actions">
+                <IconButton size="small" onClick={(e) => setOverflowEl(e.currentTarget)}>
+                  <Box component="span" sx={{ fontSize: 18, lineHeight: 1 }}>⋮</Box>
+                </IconButton>
+              </Tooltip>
+            </Stack>
+
+            <Box sx={{ flex: 1, overflow: 'auto', py: 1 }}>
               <SimpleTreeView
                 slots={{ expandIcon: ExpandIcon, collapseIcon: CollapseIcon }}
                 selectedItems={selectedId}
-                onSelectedItemsChange={(_e, id) => id && setSelectedId(id)}
+                onSelectedItemsChange={(_e, id) => id && selectFolder(id)}
                 expandedItems={expanded}
                 onExpandedItemsChange={(_e, ids) => setExpanded(ids)}
               >
                 <TreeItem
                   itemId={ROOT}
                   label={
-                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 0.5, pr: 1 }}>
-                      <Typography component="span" fontWeight={600} noWrap>
-                        📦 Test Repository
+                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 0.6, pr: 1 }}>
+                      <Typography
+                        component="span"
+                        noWrap
+                        sx={{ color: selectedId === ROOT ? 'primary.main' : 'text.primary', fontWeight: 600 }}
+                      >
+                        {expanded.includes(ROOT) ? '📂' : '📁'} Test Repository
                       </Typography>
-                      {tree.length > 0 && (
-                        <Chip size="small" label={tree.length} variant="outlined" sx={{ ml: 1, height: 20 }} />
-                      )}
+                      <Typography component="span" variant="body2" sx={{ color: 'text.secondary', ml: 1, whiteSpace: 'nowrap' }}>
+                        {countLabel(tree.length, totalFolders)}
+                      </Typography>
                     </Box>
                   }
                 >
@@ -267,73 +303,187 @@ export default function Folders() {
             </Box>
           </Box>
 
-          {/* Right: selected-folder contents */}
+          {/* ── Right: contents view ────────────────────────── */}
           <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-            <Box sx={{ px: 2, py: 1.5, borderBottom: 1, borderColor: 'divider' }}>
-              <Breadcrumbs aria-label="folder path">
-                <MuiLink
-                  component="button"
-                  underline="hover"
-                  color="inherit"
-                  onClick={() => setSelectedId(ROOT)}
-                >
-                  Test Repository
-                </MuiLink>
-                {path.map((p, i) => (
-                  <MuiLink
-                    key={p.id}
-                    component="button"
-                    underline="hover"
-                    color={i === path.length - 1 ? 'text.primary' : 'inherit'}
-                    onClick={() => setSelectedId(p.id)}
-                  >
-                    {p.name}
-                  </MuiLink>
-                ))}
-              </Breadcrumbs>
-            </Box>
+            {/* Header: breadcrumb/title + FOLDERS VIEW badge */}
+            <Stack
+              direction="row"
+              alignItems="center"
+              justifyContent="space-between"
+              sx={{ px: 2, py: 1.5, borderBottom: 1, borderColor: 'divider' }}
+            >
+              <MuiLink
+                component="button"
+                underline="hover"
+                onClick={() => setSelectedId(ROOT)}
+                sx={{ color: 'primary.main', fontWeight: 600, fontSize: '1.05rem' }}
+              >
+                {selectedFolder ? selectedFolder.name : 'Test Repository'}
+              </MuiLink>
+              <Chip label="FOLDERS VIEW" size="small" variant="outlined" sx={{ fontWeight: 600, letterSpacing: 0.5 }} />
+            </Stack>
 
-            {contents.length === 0 ? (
-              <Box sx={{ p: 6, textAlign: 'center' }}>
-                <Typography color="text.secondary">
-                  No subfolders here.
-                  {canManage ? ' Use “New folder” to add one.' : ''}
-                </Typography>
-                <Typography variant="caption" color="text.secondary">
-                  Test cases will appear here in Phase 3.
-                </Typography>
-              </Box>
+            {view === 'DELETED' ? (
+              <DeletedPanel
+                folders={deletedData?.folders ?? []}
+                canManage={canManage}
+                busy={busy}
+                onBack={() => setView('REPO')}
+                onRestore={(id) => restore.mutate(id)}
+              />
             ) : (
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Name</TableCell>
-                    <TableCell>Type</TableCell>
-                    <TableCell align="right">Subfolders</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {contents.map((c) => (
-                    <TableRow
-                      key={c.id}
-                      hover
-                      sx={{ cursor: 'pointer' }}
-                      onClick={() => {
-                        setSelectedId(c.id);
-                        setExpanded((e) => (e.includes(c.id) ? e : [...e, c.id]));
-                      }}
-                    >
-                      <TableCell>📁 {c.name}</TableCell>
-                      <TableCell sx={{ color: 'text.secondary' }}>Folder</TableCell>
-                      <TableCell align="right">{c.children.length}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+              <>
+                {/* Search + filter bar */}
+                <Stack direction="row" spacing={1} alignItems="center" sx={{ px: 2, py: 1.5 }}>
+                  <TextField
+                    size="small"
+                    placeholder="Search"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    sx={{ width: 280 }}
+                    InputProps={{
+                      endAdornment: (
+                        <InputAdornment position="end">
+                          <Box component="span" sx={{ color: 'text.secondary' }}>🔍</Box>
+                        </InputAdornment>
+                      ),
+                    }}
+                  />
+                  <Button size="small" variant="outlined" color="inherit" disabled>
+                    Filters ▾
+                  </Button>
+                </Stack>
+
+                {/* Breadcrumb path (when not at root) */}
+                {path.length > 0 && (
+                  <Box sx={{ px: 2, pb: 1 }}>
+                    <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap">
+                      <MuiLink component="button" underline="hover" color="inherit" onClick={() => setSelectedId(ROOT)}>
+                        Test Repository
+                      </MuiLink>
+                      {path.map((p, i) => (
+                        <Box key={p.id} sx={{ display: 'flex', alignItems: 'center' }}>
+                          <Box component="span" sx={{ mx: 0.5, color: 'text.disabled' }}>/</Box>
+                          <MuiLink
+                            component="button"
+                            underline="hover"
+                            color={i === path.length - 1 ? 'text.primary' : 'inherit'}
+                            onClick={() => selectFolder(p.id)}
+                          >
+                            {p.name}
+                          </MuiLink>
+                        </Box>
+                      ))}
+                    </Stack>
+                  </Box>
+                )}
+
+                <Stack direction="row" justifyContent="space-between" sx={{ px: 2, pb: 1 }}>
+                  <Typography variant="body2" color="text.secondary">
+                    Showing {filtered.length} of {contents.length} {contents.length === 1 ? 'folder' : 'folders'}
+                  </Typography>
+                  <Typography variant="body2" color="text.disabled">
+                    Test cases arrive in Phase 3
+                  </Typography>
+                </Stack>
+                <Divider />
+
+                {/* Entry list (subfolders as Xray-style cards) */}
+                <Box sx={{ flex: 1, overflow: 'auto', p: 1.5 }}>
+                  {filtered.length === 0 ? (
+                    <Box sx={{ p: 6, textAlign: 'center' }}>
+                      <Typography color="text.secondary">
+                        {contents.length === 0
+                          ? `No subfolders here.${canManage ? ' Use ＋ to add one.' : ''}`
+                          : 'No folders match your search.'}
+                      </Typography>
+                    </Box>
+                  ) : (
+                    <Stack spacing={1}>
+                      {filtered.map((c) => (
+                        <Paper
+                          key={c.id}
+                          variant="outlined"
+                          onClick={() => selectFolder(c.id)}
+                          sx={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            px: 2,
+                            py: 1.25,
+                            cursor: 'pointer',
+                            borderLeft: 4,
+                            borderLeftColor: 'primary.main',
+                            '&:hover': { bgcolor: 'action.hover' },
+                          }}
+                        >
+                          <Stack direction="row" spacing={1.5} alignItems="center">
+                            <Box component="span" sx={{ fontSize: 18 }}>📁</Box>
+                            <Box>
+                              <Typography fontWeight={500}>{c.name}</Typography>
+                              <Chip label="FOLDER" size="small" sx={{ height: 18, fontSize: 11, mt: 0.5 }} />
+                            </Box>
+                          </Stack>
+                          <Typography variant="body2" color="text.secondary">
+                            {countLabel(c.children.length, descendantCount(c))}
+                          </Typography>
+                        </Paper>
+                      ))}
+                    </Stack>
+                  )}
+                </Box>
+              </>
             )}
           </Box>
         </Paper>
       )}
+
+      {/* Left-pane overflow (⋮) menu */}
+      <Menu anchorEl={overflowEl} open={!!overflowEl} onClose={() => setOverflowEl(null)}>
+        {canManage && (
+          <MenuItem
+            disabled={!selectedFolder}
+            onClick={() => {
+              if (selectedFolder) setRenameTarget(selectedFolder);
+              setOverflowEl(null);
+            }}
+          >
+            Rename folder
+          </MenuItem>
+        )}
+        {canManage && (
+          <MenuItem
+            disabled={!selectedFolder}
+            onClick={() => {
+              if (selectedFolder) setMoveTarget(selectedFolder);
+              setOverflowEl(null);
+            }}
+          >
+            Move folder
+          </MenuItem>
+        )}
+        {canManage && (
+          <MenuItem
+            disabled={!selectedFolder}
+            sx={{ color: 'error.main' }}
+            onClick={() => {
+              if (selectedFolder) setConfirmDelete(selectedFolder);
+              setOverflowEl(null);
+            }}
+          >
+            Delete folder
+          </MenuItem>
+        )}
+        {canManage && <Divider />}
+        <MenuItem
+          onClick={() => {
+            setView((v) => (v === 'DELETED' ? 'REPO' : 'DELETED'));
+            setOverflowEl(null);
+          }}
+        >
+          {view === 'DELETED' ? 'Back to repository' : 'View deleted folders'}
+        </MenuItem>
+      </Menu>
 
       {/* Right-click context menu */}
       <Menu
@@ -342,38 +492,13 @@ export default function Folders() {
         anchorReference="anchorPosition"
         anchorPosition={menu ? { top: menu.y, left: menu.x } : undefined}
       >
-        <MenuItem
-          onClick={() => {
-            setCreateUnder({ parentId: menu!.folder.id });
-            setMenu(null);
-          }}
-        >
+        <MenuItem onClick={() => { setCreateUnder({ parentId: menu!.folder.id }); setMenu(null); }}>
           Add subfolder
         </MenuItem>
-        <MenuItem
-          onClick={() => {
-            setRenameTarget(menu!.folder);
-            setMenu(null);
-          }}
-        >
-          Rename
-        </MenuItem>
-        <MenuItem
-          onClick={() => {
-            setMoveTarget(menu!.folder);
-            setMenu(null);
-          }}
-        >
-          Move
-        </MenuItem>
+        <MenuItem onClick={() => { setRenameTarget(menu!.folder); setMenu(null); }}>Rename</MenuItem>
+        <MenuItem onClick={() => { setMoveTarget(menu!.folder); setMenu(null); }}>Move</MenuItem>
         <Divider />
-        <MenuItem
-          sx={{ color: 'error.main' }}
-          onClick={() => {
-            setConfirmDelete(menu!.folder);
-            setMenu(null);
-          }}
-        >
+        <MenuItem sx={{ color: 'error.main' }} onClick={() => { setConfirmDelete(menu!.folder); setMenu(null); }}>
           Delete
         </MenuItem>
       </Menu>
@@ -470,62 +595,30 @@ export default function Folders() {
   );
 }
 
-function Toolbar({
-  canManage,
-  selectedFolder,
-  onNew,
-  onRename,
-  onMove,
-  onDelete,
-}: {
-  canManage: boolean;
-  selectedFolder: FolderNode | null;
-  onNew: () => void;
-  onRename: () => void;
-  onMove: () => void;
-  onDelete: () => void;
-}) {
-  if (!canManage) {
-    return (
-      <Box sx={{ px: 1.5, py: 1 }}>
-        <Typography variant="caption" color="text.secondary">
-          Read-only access
-        </Typography>
-      </Box>
-    );
-  }
-  const hasSelection = !!selectedFolder;
-  return (
-    <Stack direction="row" spacing={0.5} sx={{ p: 1 }} flexWrap="wrap">
-      <Button size="small" variant="contained" onClick={onNew}>
-        {hasSelection ? '+ Subfolder' : '+ Folder'}
-      </Button>
-      <Button size="small" disabled={!hasSelection} onClick={onRename}>
-        Rename
-      </Button>
-      <Button size="small" disabled={!hasSelection} onClick={onMove}>
-        Move
-      </Button>
-      <Button size="small" color="error" disabled={!hasSelection} onClick={onDelete}>
-        Delete
-      </Button>
-    </Stack>
-  );
-}
-
 function DeletedPanel({
   folders,
   canManage,
   busy,
+  onBack,
   onRestore,
 }: {
   folders: { id: string; name: string }[];
   canManage: boolean;
   busy: boolean;
+  onBack: () => void;
   onRestore: (id: string) => void;
 }) {
   return (
-    <Paper variant="outlined" sx={{ p: 2 }}>
+    <Box sx={{ flex: 1, overflow: 'auto', p: 2 }}>
+      <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
+        <Typography variant="subtitle2" color="text.secondary">
+          Deleted folders
+        </Typography>
+        <Button size="small" onClick={onBack}>
+          ← Back to repository
+        </Button>
+      </Stack>
+      <Divider sx={{ mb: 1 }} />
       {folders.length === 0 ? (
         <Box sx={{ p: 4, textAlign: 'center' }}>
           <Typography color="text.secondary">No deleted folders.</Typography>
@@ -533,12 +626,10 @@ function DeletedPanel({
       ) : (
         <Stack spacing={1}>
           {folders.map((f) => (
-            <Stack
+            <Paper
               key={f.id}
-              direction="row"
-              alignItems="center"
-              justifyContent="space-between"
-              sx={{ px: 1 }}
+              variant="outlined"
+              sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 2, py: 1 }}
             >
               <Typography component="span" color="text.secondary">
                 🗑 {f.name}
@@ -548,11 +639,11 @@ function DeletedPanel({
                   Restore
                 </Button>
               )}
-            </Stack>
+            </Paper>
           ))}
         </Stack>
       )}
-    </Paper>
+    </Box>
   );
 }
 
@@ -651,7 +742,7 @@ function MoveDialog({
             <MenuItem value="">(Repository root)</MenuItem>
             {options.map((o) => (
               <MenuItem key={o.id} value={o.id}>
-                {'  '.repeat(o.depth)}
+                {'  '.repeat(o.depth)}
                 {o.name}
               </MenuItem>
             ))}
