@@ -2,29 +2,39 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import {
   Alert,
   Box,
+  Breadcrumbs,
   Button,
+  Chip,
   CircularProgress,
   Dialog,
   DialogActions,
   DialogContent,
   DialogContentText,
   DialogTitle,
+  Divider,
   FormControl,
   InputLabel,
+  Link as MuiLink,
+  Menu,
   MenuItem,
   Paper,
   Select,
   Snackbar,
   Stack,
-  Tab,
-  Tabs,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableRow,
   TextField,
+  ToggleButton,
+  ToggleButtonGroup,
   Typography,
 } from '@mui/material';
 import { SimpleTreeView } from '@mui/x-tree-view/SimpleTreeView';
 import { TreeItem } from '@mui/x-tree-view/TreeItem';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Link as RouterLink, useParams } from 'react-router-dom';
 import { z } from 'zod';
@@ -37,15 +47,12 @@ import {
   moveFolder,
   renameFolder,
   restoreFolder,
-  type DeletedFoldersResult,
   type FolderNode,
-  type FolderTreeResult,
 } from '../api/folders';
 
-type FolderListResult = FolderTreeResult | DeletedFoldersResult;
-
-type FilterKey = 'ACTIVE' | 'DELETED';
+const ROOT = '__root__';
 type Toast = { msg: string; severity: 'success' | 'error' };
+type ContextMenu = { folder: FolderNode; x: number; y: number } | null;
 
 const ExpandIcon = () => <Box component="span">▸</Box>;
 const CollapseIcon = () => <Box component="span">▾</Box>;
@@ -55,11 +62,30 @@ const nameSchema = z.object({
 });
 type NameForm = z.infer<typeof nameSchema>;
 
-/** Flattens the active tree to `{ id, name, depth }`, optionally excluding a subtree. */
+interface TreeIndex {
+  byId: Map<string, FolderNode>;
+  parentOf: Map<string, string | null>;
+}
+
+function indexTree(tree: FolderNode[]): TreeIndex {
+  const byId = new Map<string, FolderNode>();
+  const parentOf = new Map<string, string | null>();
+  const walk = (nodes: FolderNode[], parent: string | null) => {
+    for (const n of nodes) {
+      byId.set(n.id, n);
+      parentOf.set(n.id, parent);
+      walk(n.children, n.id);
+    }
+  };
+  walk(tree, null);
+  return { byId, parentOf };
+}
+
+/** Flattens the tree to `{ id, name, depth }`, optionally excluding a subtree. */
 function flatten(nodes: FolderNode[], excludeId?: string, depth = 0): { id: string; name: string; depth: number }[] {
   const out: { id: string; name: string; depth: number }[] = [];
   for (const n of nodes) {
-    if (n.id === excludeId) continue; // skip the folder (and its subtree) being moved
+    if (n.id === excludeId) continue;
     out.push({ id: n.id, name: n.name, depth });
     out.push(...flatten(n.children, excludeId, depth + 1));
   }
@@ -69,8 +95,13 @@ function flatten(nodes: FolderNode[], excludeId?: string, depth = 0): { id: stri
 export default function Folders() {
   const { projectId } = useParams<{ projectId: string }>();
   const queryClient = useQueryClient();
-  const [filter, setFilter] = useState<FilterKey>('ACTIVE');
+
+  const [view, setView] = useState<'REPO' | 'DELETED'>('REPO');
+  const [selectedId, setSelectedId] = useState<string>(ROOT);
+  const [expanded, setExpanded] = useState<string[]>([ROOT]);
+  const [menu, setMenu] = useState<ContextMenu>(null);
   const [toast, setToast] = useState<Toast | null>(null);
+
   const [createUnder, setCreateUnder] = useState<{ parentId: string | null } | null>(null);
   const [renameTarget, setRenameTarget] = useState<FolderNode | null>(null);
   const [moveTarget, setMoveTarget] = useState<FolderNode | null>(null);
@@ -79,21 +110,45 @@ export default function Folders() {
   const onError = (err: unknown) => setToast({ msg: getApiErrorMessage(err), severity: 'error' });
   const invalidate = () => void queryClient.invalidateQueries({ queryKey: ['folders', projectId] });
 
-  const { data, isLoading, isError, error } = useQuery<FolderListResult>({
-    queryKey: ['folders', projectId, filter],
-    queryFn: (): Promise<FolderListResult> =>
-      filter === 'DELETED' ? listDeletedFolders(projectId!) : listFolderTree(projectId!),
+  const { data: active, isLoading, isError, error } = useQuery({
+    queryKey: ['folders', projectId, 'tree'],
+    queryFn: () => listFolderTree(projectId!),
     enabled: !!projectId,
   });
+  const { data: deletedData } = useQuery({
+    queryKey: ['folders', projectId, 'deleted'],
+    queryFn: () => listDeletedFolders(projectId!),
+    enabled: !!projectId && view === 'DELETED',
+  });
 
-  const canManage = data?.canManage ?? false;
-  const tree = data && 'tree' in data ? data.tree : [];
-  const deleted = data && 'folders' in data ? data.folders : [];
+  const tree = active?.tree ?? [];
+  const canManage = active?.canManage ?? false;
+  const { byId, parentOf } = useMemo(() => indexTree(tree), [tree]);
+
+  // The selected folder (null when the virtual repository root is selected).
+  const selectedFolder = selectedId === ROOT ? null : byId.get(selectedId) ?? null;
+
+  // Breadcrumb path from the repository root to the selected folder.
+  const path = useMemo(() => {
+    const out: { id: string; name: string }[] = [];
+    let cur: string | null = selectedFolder?.id ?? null;
+    while (cur) {
+      const node = byId.get(cur);
+      if (!node) break;
+      out.unshift({ id: node.id, name: node.name });
+      cur = parentOf.get(cur) ?? null;
+    }
+    return out;
+  }, [selectedFolder, byId, parentOf]);
+
+  // Contents of the selected node (children of a folder, or the roots for the repository).
+  const contents = selectedId === ROOT ? tree : selectedFolder?.children ?? [];
 
   const remove = useMutation({
     mutationFn: (id: string) => deleteFolder(projectId!, id),
     onSuccess: () => {
       invalidate();
+      if (selectedFolder && confirmDelete?.id === selectedId) setSelectedId(ROOT);
       setToast({ msg: 'Folder deleted', severity: 'success' });
     },
     onError,
@@ -114,25 +169,22 @@ export default function Folders() {
         key={node.id}
         itemId={node.id}
         label={
-          <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ py: 0.5 }}>
-            <Typography component="span">📁 {node.name}</Typography>
-            {canManage && (
-              <Stack direction="row" spacing={0.5} onClick={(e) => e.stopPropagation()}>
-                <Button size="small" onClick={() => setCreateUnder({ parentId: node.id })}>
-                  Add
-                </Button>
-                <Button size="small" onClick={() => setRenameTarget(node)}>
-                  Rename
-                </Button>
-                <Button size="small" onClick={() => setMoveTarget(node)}>
-                  Move
-                </Button>
-                <Button size="small" color="error" onClick={() => setConfirmDelete(node)}>
-                  Delete
-                </Button>
-              </Stack>
+          <Box
+            onContextMenu={(e) => {
+              if (!canManage) return;
+              e.preventDefault();
+              e.stopPropagation();
+              setMenu({ folder: node, x: e.clientX, y: e.clientY });
+            }}
+            sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 0.5, pr: 1 }}
+          >
+            <Typography component="span" noWrap>
+              📁 {node.name}
+            </Typography>
+            {node.children.length > 0 && (
+              <Chip size="small" label={node.children.length} variant="outlined" sx={{ ml: 1, height: 20 }} />
             )}
-          </Stack>
+          </Box>
         }
       >
         {node.children.map(renderNode)}
@@ -148,73 +200,183 @@ export default function Folders() {
             ← Projects
           </Button>
           <Typography variant="h5" fontWeight={700}>
-            Folders
+            Test Repository
           </Typography>
         </Box>
-        {canManage && filter === 'ACTIVE' && (
-          <Button variant="contained" onClick={() => setCreateUnder({ parentId: null })}>
-            New folder
-          </Button>
-        )}
+        <ToggleButtonGroup
+          size="small"
+          exclusive
+          value={view}
+          onChange={(_e, v) => v && setView(v)}
+        >
+          <ToggleButton value="REPO">Repository</ToggleButton>
+          <ToggleButton value="DELETED">Deleted</ToggleButton>
+        </ToggleButtonGroup>
       </Stack>
 
-      <Paper sx={{ mt: 2 }}>
-        <Tabs
-          value={filter}
-          onChange={(_e, v) => setFilter(v as FilterKey)}
-          sx={{ borderBottom: 1, borderColor: 'divider' }}
-        >
-          <Tab value="ACTIVE" label="Active" />
-          <Tab value="DELETED" label="Deleted" />
-        </Tabs>
-
-        {isLoading ? (
-          <Box sx={{ display: 'flex', justifyContent: 'center', p: 6 }}>
-            <CircularProgress />
-          </Box>
-        ) : isError ? (
-          <Alert severity="error" sx={{ m: 2 }}>
-            {getApiErrorMessage(error, 'Failed to load folders')}
-          </Alert>
-        ) : filter === 'ACTIVE' ? (
-          tree.length === 0 ? (
-            <Box sx={{ p: 6, textAlign: 'center' }}>
-              <Typography color="text.secondary">
-                No folders yet.{canManage ? ' Create one to get started.' : ''}
-              </Typography>
-            </Box>
-          ) : (
-            <SimpleTreeView slots={{ expandIcon: ExpandIcon, collapseIcon: CollapseIcon }} sx={{ p: 2 }}>
-              {tree.map(renderNode)}
-            </SimpleTreeView>
-          )
-        ) : deleted.length === 0 ? (
-          <Box sx={{ p: 6, textAlign: 'center' }}>
-            <Typography color="text.secondary">No deleted folders.</Typography>
-          </Box>
-        ) : (
-          <Stack sx={{ p: 2 }} spacing={1}>
-            {deleted.map((f) => (
-              <Stack
-                key={f.id}
-                direction="row"
-                alignItems="center"
-                justifyContent="space-between"
-                sx={{ px: 1 }}
+      {isLoading ? (
+        <Box sx={{ display: 'flex', justifyContent: 'center', p: 6 }}>
+          <CircularProgress />
+        </Box>
+      ) : isError ? (
+        <Alert severity="error">{getApiErrorMessage(error, 'Failed to load folders')}</Alert>
+      ) : view === 'DELETED' ? (
+        <DeletedPanel
+          folders={deletedData?.folders ?? []}
+          canManage={canManage}
+          busy={busy}
+          onRestore={(id) => restore.mutate(id)}
+        />
+      ) : (
+        <Paper variant="outlined" sx={{ display: 'flex', minHeight: 420, overflow: 'hidden' }}>
+          {/* Left: folder tree */}
+          <Box sx={{ width: 320, borderRight: 1, borderColor: 'divider', display: 'flex', flexDirection: 'column' }}>
+            <Toolbar
+              canManage={canManage}
+              selectedFolder={selectedFolder}
+              onNew={() => setCreateUnder({ parentId: selectedFolder?.id ?? null })}
+              onRename={() => selectedFolder && setRenameTarget(selectedFolder)}
+              onMove={() => selectedFolder && setMoveTarget(selectedFolder)}
+              onDelete={() => selectedFolder && setConfirmDelete(selectedFolder)}
+            />
+            <Divider />
+            <Box sx={{ flex: 1, overflow: 'auto', p: 1 }}>
+              <SimpleTreeView
+                slots={{ expandIcon: ExpandIcon, collapseIcon: CollapseIcon }}
+                selectedItems={selectedId}
+                onSelectedItemsChange={(_e, id) => id && setSelectedId(id)}
+                expandedItems={expanded}
+                onExpandedItemsChange={(_e, ids) => setExpanded(ids)}
               >
-                <Typography component="span" color="text.secondary">
-                  🗑 {f.name}
+                <TreeItem
+                  itemId={ROOT}
+                  label={
+                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 0.5, pr: 1 }}>
+                      <Typography component="span" fontWeight={600} noWrap>
+                        📦 Test Repository
+                      </Typography>
+                      {tree.length > 0 && (
+                        <Chip size="small" label={tree.length} variant="outlined" sx={{ ml: 1, height: 20 }} />
+                      )}
+                    </Box>
+                  }
+                >
+                  {tree.map(renderNode)}
+                </TreeItem>
+              </SimpleTreeView>
+            </Box>
+          </Box>
+
+          {/* Right: selected-folder contents */}
+          <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+            <Box sx={{ px: 2, py: 1.5, borderBottom: 1, borderColor: 'divider' }}>
+              <Breadcrumbs aria-label="folder path">
+                <MuiLink
+                  component="button"
+                  underline="hover"
+                  color="inherit"
+                  onClick={() => setSelectedId(ROOT)}
+                >
+                  Test Repository
+                </MuiLink>
+                {path.map((p, i) => (
+                  <MuiLink
+                    key={p.id}
+                    component="button"
+                    underline="hover"
+                    color={i === path.length - 1 ? 'text.primary' : 'inherit'}
+                    onClick={() => setSelectedId(p.id)}
+                  >
+                    {p.name}
+                  </MuiLink>
+                ))}
+              </Breadcrumbs>
+            </Box>
+
+            {contents.length === 0 ? (
+              <Box sx={{ p: 6, textAlign: 'center' }}>
+                <Typography color="text.secondary">
+                  No subfolders here.
+                  {canManage ? ' Use “New folder” to add one.' : ''}
                 </Typography>
-                {canManage && (
-                  <Button size="small" disabled={busy} onClick={() => restore.mutate(f.id)}>
-                    Restore
-                  </Button>
-                )}
-              </Stack>
-            ))}
-          </Stack>
-        )}
-      </Paper>
+                <Typography variant="caption" color="text.secondary">
+                  Test cases will appear here in Phase 3.
+                </Typography>
+              </Box>
+            ) : (
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Name</TableCell>
+                    <TableCell>Type</TableCell>
+                    <TableCell align="right">Subfolders</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {contents.map((c) => (
+                    <TableRow
+                      key={c.id}
+                      hover
+                      sx={{ cursor: 'pointer' }}
+                      onClick={() => {
+                        setSelectedId(c.id);
+                        setExpanded((e) => (e.includes(c.id) ? e : [...e, c.id]));
+                      }}
+                    >
+                      <TableCell>📁 {c.name}</TableCell>
+                      <TableCell sx={{ color: 'text.secondary' }}>Folder</TableCell>
+                      <TableCell align="right">{c.children.length}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </Box>
+        </Paper>
+      )}
+
+      {/* Right-click context menu */}
+      <Menu
+        open={!!menu}
+        onClose={() => setMenu(null)}
+        anchorReference="anchorPosition"
+        anchorPosition={menu ? { top: menu.y, left: menu.x } : undefined}
+      >
+        <MenuItem
+          onClick={() => {
+            setCreateUnder({ parentId: menu!.folder.id });
+            setMenu(null);
+          }}
+        >
+          Add subfolder
+        </MenuItem>
+        <MenuItem
+          onClick={() => {
+            setRenameTarget(menu!.folder);
+            setMenu(null);
+          }}
+        >
+          Rename
+        </MenuItem>
+        <MenuItem
+          onClick={() => {
+            setMoveTarget(menu!.folder);
+            setMenu(null);
+          }}
+        >
+          Move
+        </MenuItem>
+        <Divider />
+        <MenuItem
+          sx={{ color: 'error.main' }}
+          onClick={() => {
+            setConfirmDelete(menu!.folder);
+            setMenu(null);
+          }}
+        >
+          Delete
+        </MenuItem>
+      </Menu>
 
       {createUnder && (
         <NameDialog
@@ -224,6 +386,9 @@ export default function Folders() {
           onSubmit={(name) => createFolder(projectId!, { name, parentId: createUnder.parentId })}
           onSaved={() => {
             invalidate();
+            if (createUnder.parentId) {
+              setExpanded((e) => (e.includes(createUnder.parentId!) ? e : [...e, createUnder.parentId!]));
+            }
             setCreateUnder(null);
             setToast({ msg: 'Folder created', severity: 'success' });
           }}
@@ -269,7 +434,7 @@ export default function Folders() {
             <DialogContent>
               <DialogContentText>
                 Delete {confirmDelete.name}? Any subfolders are deleted too. They move to the
-                Deleted tab and can be restored.
+                Deleted view and can be restored.
               </DialogContentText>
             </DialogContent>
             <DialogActions>
@@ -302,6 +467,92 @@ export default function Folders() {
         ) : undefined}
       </Snackbar>
     </Box>
+  );
+}
+
+function Toolbar({
+  canManage,
+  selectedFolder,
+  onNew,
+  onRename,
+  onMove,
+  onDelete,
+}: {
+  canManage: boolean;
+  selectedFolder: FolderNode | null;
+  onNew: () => void;
+  onRename: () => void;
+  onMove: () => void;
+  onDelete: () => void;
+}) {
+  if (!canManage) {
+    return (
+      <Box sx={{ px: 1.5, py: 1 }}>
+        <Typography variant="caption" color="text.secondary">
+          Read-only access
+        </Typography>
+      </Box>
+    );
+  }
+  const hasSelection = !!selectedFolder;
+  return (
+    <Stack direction="row" spacing={0.5} sx={{ p: 1 }} flexWrap="wrap">
+      <Button size="small" variant="contained" onClick={onNew}>
+        {hasSelection ? '+ Subfolder' : '+ Folder'}
+      </Button>
+      <Button size="small" disabled={!hasSelection} onClick={onRename}>
+        Rename
+      </Button>
+      <Button size="small" disabled={!hasSelection} onClick={onMove}>
+        Move
+      </Button>
+      <Button size="small" color="error" disabled={!hasSelection} onClick={onDelete}>
+        Delete
+      </Button>
+    </Stack>
+  );
+}
+
+function DeletedPanel({
+  folders,
+  canManage,
+  busy,
+  onRestore,
+}: {
+  folders: { id: string; name: string }[];
+  canManage: boolean;
+  busy: boolean;
+  onRestore: (id: string) => void;
+}) {
+  return (
+    <Paper variant="outlined" sx={{ p: 2 }}>
+      {folders.length === 0 ? (
+        <Box sx={{ p: 4, textAlign: 'center' }}>
+          <Typography color="text.secondary">No deleted folders.</Typography>
+        </Box>
+      ) : (
+        <Stack spacing={1}>
+          {folders.map((f) => (
+            <Stack
+              key={f.id}
+              direction="row"
+              alignItems="center"
+              justifyContent="space-between"
+              sx={{ px: 1 }}
+            >
+              <Typography component="span" color="text.secondary">
+                🗑 {f.name}
+              </Typography>
+              {canManage && (
+                <Button size="small" disabled={busy} onClick={() => onRestore(f.id)}>
+                  Restore
+                </Button>
+              )}
+            </Stack>
+          ))}
+        </Stack>
+      )}
+    </Paper>
   );
 }
 
@@ -397,10 +648,10 @@ function MoveDialog({
             value={parentId}
             onChange={(e) => setParentId(e.target.value)}
           >
-            <MenuItem value="">(Root)</MenuItem>
+            <MenuItem value="">(Repository root)</MenuItem>
             {options.map((o) => (
               <MenuItem key={o.id} value={o.id}>
-                {' '.repeat(o.depth * 2)}
+                {'  '.repeat(o.depth)}
                 {o.name}
               </MenuItem>
             ))}
