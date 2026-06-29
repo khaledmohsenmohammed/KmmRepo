@@ -12,6 +12,15 @@ export async function listProjects(req: Request, res: Response): Promise<void> {
   res.json({ projects });
 }
 
+/** Member-facing: list the projects the current user can access. */
+export async function listMyProjects(req: Request, res: Response): Promise<void> {
+  const projects = await projectsService.listMyProjects(
+    req.user!.sub,
+    req.user!.role === 'SUPER_ADMIN',
+  );
+  res.json({ projects });
+}
+
 export async function createProject(req: Request, res: Response): Promise<void> {
   const project = await projectsService.createProject(req.user!.sub, req.body);
   res.status(201).json({ project });

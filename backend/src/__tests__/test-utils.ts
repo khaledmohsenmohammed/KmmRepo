@@ -5,6 +5,11 @@ type FakeUser = {
   name: string;
   email: string;
   passwordHash: string;
+  bio?: string | null;
+  avatarUrl?: string | null;
+  avatarName?: string | null;
+  avatarDescription?: string | null;
+  avatarRef?: string | null;
   status: string;
   globalRole: string;
   isDeleted: boolean;

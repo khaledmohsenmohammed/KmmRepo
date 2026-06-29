@@ -34,6 +34,7 @@ import {
 } from '@mui/material';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
+import { Link as RouterLink } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { listUsers } from '../api/admin';
@@ -159,6 +160,13 @@ export default function Projects() {
                         </Button>
                       ) : (
                         <Stack direction="row" spacing={1} justifyContent="flex-end">
+                          <Button
+                            size="small"
+                            component={RouterLink}
+                            to={`/projects/${p.id}/folders`}
+                          >
+                            Folders
+                          </Button>
                           <Button size="small" onClick={() => setMembersFor(p)}>
                             Members
                           </Button>
