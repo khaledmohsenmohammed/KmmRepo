@@ -275,8 +275,9 @@ export default function Folders() {
             <Box sx={{ flex: 1, overflow: 'auto', py: 1 }}>
               <SimpleTreeView
                 slots={{ expandIcon: ExpandIcon, collapseIcon: CollapseIcon }}
+                expansionTrigger="iconContainer"
                 selectedItems={selectedId}
-                onSelectedItemsChange={(_e, id) => id && selectFolder(id)}
+                onSelectedItemsChange={(_e, id) => id && setSelectedId(id)}
                 expandedItems={expanded}
                 onExpandedItemsChange={(_e, ids) => setExpanded(ids)}
               >
