@@ -6,6 +6,7 @@ import { ProtectedRoute } from './components/ProtectedRoute';
 import { useAuth } from './features/auth/AuthContext';
 import Admin from './pages/Admin';
 import Dashboard from './pages/Dashboard';
+import Folders from './pages/Folders';
 import Login from './pages/Login';
 import Profile from './pages/Profile';
 import Projects from './pages/Projects';
@@ -47,6 +48,8 @@ export default function App() {
         <Route element={<AppLayout />}>
           <Route path="/" element={<Dashboard />} />
           <Route path="/profile" element={<Profile />} />
+          {/* Member-facing: access is enforced server-side by per-project role. */}
+          <Route path="/projects/:projectId/folders" element={<Folders />} />
           <Route element={<AdminRoute />}>
             <Route path="/admin" element={<Admin />} />
             <Route path="/admin/projects" element={<Projects />} />

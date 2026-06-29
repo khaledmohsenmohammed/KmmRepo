@@ -48,6 +48,44 @@ function toProjectMember(m: ProjectMembership & { user: User }): ProjectMember {
   };
 }
 
+export interface MyProject {
+  id: string;
+  name: string;
+  description: string | null;
+  myRole: string | null;
+}
+
+/**
+ * Lists the active projects the caller can access: all of them for a super-admin,
+ * or just the ones they're a member of (with their role) for a regular user.
+ * Member-facing — used by the dashboard to navigate into folder trees.
+ */
+export async function listMyProjects(userId: string, isSuperAdmin: boolean): Promise<MyProject[]> {
+  if (isSuperAdmin) {
+    const projects = await prisma.project.findMany({
+      where: { isDeleted: false },
+      orderBy: { createdAt: 'desc' },
+    });
+    return projects.map((p) => ({
+      id: p.id,
+      name: p.name,
+      description: p.description,
+      myRole: null,
+    }));
+  }
+  const memberships = await prisma.projectMembership.findMany({
+    where: { userId, project: { isDeleted: false } },
+    include: { project: true },
+    orderBy: { grantedAt: 'desc' },
+  });
+  return memberships.map((m) => ({
+    id: m.project.id,
+    name: m.project.name,
+    description: m.project.description,
+    myRole: m.role,
+  }));
+}
+
 export interface ListProjectsParams {
   deleted?: boolean;
 }

@@ -23,6 +23,7 @@ export const openapiSpec = {
     { name: 'Profile', description: 'Self-service profile management for the current user' },
     { name: 'Admin', description: 'Super-admin user management (requires SUPER_ADMIN)' },
     { name: 'Projects', description: 'Super-admin project configuration & user assignment (requires SUPER_ADMIN)' },
+    { name: 'Folders', description: 'Nested folder tree within a project (super-admin or a project member, gated by per-project role)' },
   ],
   components: {
     securitySchemes: {
@@ -211,6 +212,49 @@ export const openapiSpec = {
           role: { $ref: '#/components/schemas/ProjectRole' },
         },
         required: ['userId', 'role'],
+      },
+      FolderNode: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          name: { type: 'string' },
+          parentId: { type: 'string', nullable: true },
+          isDeleted: { type: 'boolean' },
+          createdAt: { type: 'string', format: 'date-time' },
+          children: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/FolderNode' },
+          },
+        },
+        required: ['id', 'name', 'parentId', 'isDeleted', 'createdAt', 'children'],
+      },
+      FolderTreeResponse: {
+        type: 'object',
+        properties: { tree: { type: 'array', items: { $ref: '#/components/schemas/FolderNode' } } },
+        required: ['tree'],
+      },
+      FolderResponse: {
+        type: 'object',
+        properties: { folder: { $ref: '#/components/schemas/FolderNode' } },
+        required: ['folder'],
+      },
+      CreateFolderRequest: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', minLength: 1, maxLength: 100, example: 'Sprint 1' },
+          parentId: { type: 'string', nullable: true, description: 'Omit or null for a root folder' },
+        },
+        required: ['name'],
+      },
+      RenameFolderRequest: {
+        type: 'object',
+        properties: { name: { type: 'string', minLength: 1, maxLength: 100 } },
+        required: ['name'],
+      },
+      MoveFolderRequest: {
+        type: 'object',
+        properties: { parentId: { type: 'string', nullable: true, description: 'null moves to root' } },
+        required: ['parentId'],
       },
     },
   },
@@ -474,6 +518,105 @@ export const openapiSpec = {
         responses: {
           '200': { description: 'Member removed', content: { 'application/json': { schema: { type: 'object', properties: { message: { type: 'string' } } } } } },
           '404': { description: 'Membership not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+        },
+      },
+    },
+    '/projects/{projectId}/folders': {
+      get: {
+        tags: ['Folders'],
+        summary: 'List a project\'s folders (nested tree, or flat deleted list)',
+        description: 'Any project member (or super-admin). Active folders return as a nested `tree`; `?deleted=true` returns a flat `folders` list for restore.',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: 'projectId', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'deleted', in: 'query', required: false, schema: { type: 'string', enum: ['true', 'false'] } },
+        ],
+        responses: {
+          '200': { description: 'Folder tree (or flat deleted list)', content: { 'application/json': { schema: { $ref: '#/components/schemas/FolderTreeResponse' } } } },
+          '401': { description: 'Unauthenticated', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          '403': { description: 'Not a project member', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          '404': { description: 'Project not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+        },
+      },
+      post: {
+        tags: ['Folders'],
+        summary: 'Create a folder (root or nested)',
+        description: 'Requires a manage-capable project role (or super-admin).',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'projectId', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/CreateFolderRequest' } } } },
+        responses: {
+          '201': { description: 'Created folder', content: { 'application/json': { schema: { $ref: '#/components/schemas/FolderResponse' } } } },
+          '400': { description: 'Validation failed / parent in another project', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          '403': { description: 'Role cannot manage folders', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          '404': { description: 'Project or parent not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+        },
+      },
+    },
+    '/projects/{projectId}/folders/{id}': {
+      patch: {
+        tags: ['Folders'],
+        summary: 'Rename a folder',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: 'projectId', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+        ],
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/RenameFolderRequest' } } } },
+        responses: {
+          '200': { description: 'Updated folder', content: { 'application/json': { schema: { $ref: '#/components/schemas/FolderResponse' } } } },
+          '403': { description: 'Role cannot manage folders', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          '404': { description: 'Folder not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+        },
+      },
+      delete: {
+        tags: ['Folders'],
+        summary: 'Soft-delete a folder (cascades to descendants)',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: 'projectId', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+        ],
+        responses: {
+          '200': { description: 'Deleted count', content: { 'application/json': { schema: { type: 'object', properties: { deletedCount: { type: 'integer' } } } } } },
+          '403': { description: 'Role cannot manage folders', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          '404': { description: 'Folder not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+        },
+      },
+    },
+    '/projects/{projectId}/folders/{id}/move': {
+      post: {
+        tags: ['Folders'],
+        summary: 'Move / reparent a folder',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: 'projectId', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+        ],
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/MoveFolderRequest' } } } },
+        responses: {
+          '200': { description: 'Moved folder', content: { 'application/json': { schema: { $ref: '#/components/schemas/FolderResponse' } } } },
+          '400': { description: 'Self-parent / parent in another project', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          '409': { description: 'Move would create a cycle', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          '404': { description: 'Folder or parent not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+        },
+      },
+    },
+    '/projects/{projectId}/folders/{id}/restore': {
+      post: {
+        tags: ['Folders'],
+        summary: 'Restore a soft-deleted folder',
+        description: 'Rejects (409) if the folder\'s parent is still deleted. `?cascade=true` restores the deleted subtree.',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: 'projectId', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'cascade', in: 'query', required: false, schema: { type: 'string', enum: ['true', 'false'] } },
+        ],
+        responses: {
+          '200': { description: 'Restored count', content: { 'application/json': { schema: { type: 'object', properties: { restoredCount: { type: 'integer' } } } } } },
+          '409': { description: 'Parent still deleted', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          '404': { description: 'Folder not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
         },
       },
     },

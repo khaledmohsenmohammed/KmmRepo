@@ -33,6 +33,19 @@ export interface ProjectMember {
   grantedAt: string;
 }
 
+export interface MyProject {
+  id: string;
+  name: string;
+  description: string | null;
+  myRole: ProjectRole | null;
+}
+
+/** Member-facing: the projects the current user can access (with their role). */
+export async function listMyProjects(): Promise<MyProject[]> {
+  const res = await api.get('/projects');
+  return res.data.projects;
+}
+
 export interface ListProjectsParams {
   deleted?: boolean;
 }

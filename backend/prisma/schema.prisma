@@ -75,8 +75,34 @@ model Project {
   deletedBy   String?
 
   memberships ProjectMembership[]
+  folders     Folder[]
 
   @@map("projects")
+}
+
+model Folder {
+  id        String    @id @default(cuid())
+  name      String
+  projectId String
+  parentId  String?
+  createdBy String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  // Soft delete (cascades to descendants in the service). Never hard-delete folders.
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+  deletedBy String?
+
+  project   Project   @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  // Self-relation for the nested folder tree. Restrict so a hard delete can never
+  // silently orphan/detach a subtree — the app only ever soft-deletes.
+  parent    Folder?   @relation("FolderTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children  Folder[]  @relation("FolderTree")
+
+  @@index([projectId])
+  @@index([parentId])
+  @@map("folders")
 }
 
 model ProjectMembership {
